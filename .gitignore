@@ -19,3 +19,6 @@ scripts/
 
 # Tools
 .ruff_cache/
+
+# Documentation
+doc/
