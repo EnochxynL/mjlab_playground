@@ -15,8 +15,6 @@ wandb/
 *.pt
 *.onnx
 
-scripts/
-
 # Tools
 .ruff_cache/
 

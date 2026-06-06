@@ -20,13 +20,18 @@ uv sync
 Train a task:
 
 ```bash
-uv run train <task-id> --num_envs 4096
+# uv run train <task-id> --num_envs 4096 # deprecated
+uv run train <task-id> --env.scene.num-envs 4096
+uv run train Mjlab-Getup-Flat-Booster-T1 --env.scene.num-envs 4096
+uv run train Mjlab-Velocity-Flat-Booster-T1 --env.scene.num-envs 4096
+uv run train Mjlab-Tracking-Flat-Booster-T1 --env.scene.num-envs 4096
 ```
 
 Play back a trained policy:
 
 ```bash
 uv run play <task-id>
+uv run play Mjlab-Getup-Flat-Booster-T1 --checkpoint_file=logs/rsl_rl/t1_getup/2026-05-01_15-50-00/model_2999.pt 
 ```
 
 ### Getup training
