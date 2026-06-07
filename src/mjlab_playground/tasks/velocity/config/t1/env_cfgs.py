@@ -19,7 +19,7 @@ from mjlab.sensor import (
 )
 from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
-from src.mjlab_playground.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
+from mjlab_playground.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 
 def booster_t1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
