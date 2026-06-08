@@ -1,10 +1,10 @@
-"""RL configuration for Unitree G1 soccer task."""
+"""RL configurations for Unitree G1 soccer tasks."""
 
 from mjlab.rl import RslRlModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 
 
-def g1_soccer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
-    """Create RL runner configuration for Unitree G1 soccer task."""
+def _base_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+    """Shared PPO hyperparameters for both soccer stages."""
     return RslRlOnPolicyRunnerCfg(
         actor=RslRlModelCfg(
             hidden_dims=(512, 256, 128),
@@ -35,8 +35,22 @@ def g1_soccer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
             desired_kl=0.01,
             max_grad_norm=1.0,
         ),
-        experiment_name="g1_soccer",
         save_interval=500,
         num_steps_per_env=24,
-        max_iterations=30_000,
     )
+
+
+def g1_soccer_destination_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+    """Stage 2: kick-to-destination on flat ground (30k iterations)."""
+    cfg = _base_ppo_runner_cfg()
+    cfg.experiment_name = "g1_soccer_destination"
+    cfg.max_iterations = 30_000
+    return cfg
+
+
+def g1_soccer_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+    """Stage 1: motion-skill acquisition on gravel terrain (4k iterations)."""
+    cfg = _base_ppo_runner_cfg()
+    cfg.experiment_name = "g1_soccer_tracking"
+    cfg.max_iterations = 4_000
+    return cfg

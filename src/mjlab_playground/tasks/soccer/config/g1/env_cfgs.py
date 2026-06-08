@@ -1,11 +1,18 @@
-"""Unitree G1 soccer environment configuration.
+"""Unitree G1 soccer environment configurations.
 
 Inherits from the mjlab tracking task and adds soccer-specific entities,
 observations, and rewards ported from HumanoidSoccer (arXiv-2602.05310v1).
+
+Two stages:
+  Stage 1 (Mjlab-SoccerTracking-Terrain-G1):  gravel terrain, adaptive sampling,
+                                              tracking rewards only, soccer obs.
+  Stage 2 (Mjlab-SoccerDestination-Flat-G1):  flat ground, uniform sampling,
+                                              tracking + kick rewards, soccer obs.
 """
 
 import math
 from pathlib import Path
+from typing import Literal
 
 import mujoco
 
@@ -19,6 +26,8 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
+from mjlab.terrains import TerrainEntityCfg, TerrainGeneratorCfg
+from mjlab.terrains.heightfield_terrains import HfRandomUniformTerrainCfg
 
 from ...mdp import commands as soccer_commands
 from ...mdp import observations as soccer_obs
@@ -42,12 +51,45 @@ def get_soccer_ball_cfg() -> EntityCfg:
     )
 
 
-def g1_soccer_env_cfg(
-    has_state_estimation: bool = True,
-    play: bool = False,
-) -> ManagerBasedRlEnvCfg:
-    """Create Unitree G1 flat terrain soccer configuration."""
-    cfg = make_tracking_env_cfg()
+# ── terrain config (Stage 1) ───────────────────────────────────────────────
+
+_SOCCER_TERRAIN_CFG = TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    curriculum=False,
+    sub_terrains={
+        "random_rough": HfRandomUniformTerrainCfg(
+            proportion=1.0,
+            noise_range=(-0.02, 0.02),
+            noise_step=0.02,
+        ),
+    },
+)
+
+
+def _soccer_rough_terrain_cfg() -> TerrainEntityCfg:
+    """Rough terrain matching HumanoidSoccer G1TerrainEnvCfg."""
+    return TerrainEntityCfg(
+        terrain_type="generator",
+        terrain_generator=_SOCCER_TERRAIN_CFG,
+    )
+
+
+# ── common setup shared by both stages ─────────────────────────────────────
+
+
+def _apply_common_soccer_config(
+    cfg: ManagerBasedRlEnvCfg,
+    has_state_estimation: bool,
+    play: bool,
+    sampling_strategy: Literal["uniform", "adaptive"],
+) -> tuple[SceneEntityCfg, SceneEntityCfg]:
+    """Apply scene, physics, actions, commands, obs, terminations, events.
+
+    Returns (foot_cfg, waist_cfg) for per-stage reward configuration.
+    """
 
     # ── scene (robot + ball) ──────────────────────────────────────────
 
@@ -127,7 +169,7 @@ def g1_soccer_env_cfg(
             "yaw": (-0.78, 0.78),
         },
         joint_position_range=(-0.52, 0.52),
-        sampling_strategy="uniform",
+        sampling_strategy=sampling_strategy,
         curve_offset_range={
             "radius": (-0.25, 0.25),
             "arc_angle": math.pi / 9,
@@ -170,7 +212,74 @@ def g1_soccer_env_cfg(
         enable_corruption=False,
     )
 
-    # ── rewards ──────────────────────────────────────────────────────
+    # ── tracking reward weight adjustments (shared by both stages) ────
+
+    cfg.rewards["motion_global_root_pos"].weight = 0.0
+    cfg.rewards["motion_global_root_ori"].weight = 1.0
+    cfg.rewards["motion_body_pos"].params["body_names"] = (
+        "pelvis",
+        "left_hip_roll_link",
+        "left_knee_link",
+        "right_hip_roll_link",
+        "right_knee_link",
+        "torso_link",
+        "left_shoulder_roll_link",
+        "left_elbow_link",
+        "left_wrist_yaw_link",
+        "right_shoulder_roll_link",
+        "right_elbow_link",
+        "right_wrist_yaw_link",
+    )
+    cfg.rewards["motion_body_ori"].params["body_names"] = (
+        "pelvis",
+        "left_hip_roll_link",
+        "left_knee_link",
+        "right_hip_roll_link",
+        "right_knee_link",
+        "torso_link",
+        "left_shoulder_roll_link",
+        "left_elbow_link",
+        "left_wrist_yaw_link",
+        "right_shoulder_roll_link",
+        "right_elbow_link",
+        "right_wrist_yaw_link",
+    )
+
+    # ── terminations ─────────────────────────────────────────────────
+
+    cfg.terminations["anchor_pos"] = TerminationTermCfg(
+        func=cfg.terminations["anchor_pos"].func,
+        params={"command_name": "motion", "threshold": 0.25},
+    )
+    cfg.terminations["ee_body_pos"].params["body_names"] = (
+        "left_ankle_roll_link",
+        "right_ankle_roll_link",
+        "left_wrist_yaw_link",
+        "right_wrist_yaw_link",
+    )
+
+    # ── events ───────────────────────────────────────────────────────
+
+    cfg.events["foot_friction"].params["asset_cfg"].geom_names = (
+        r"^(left|right)_foot[1-7]_collision$"
+    )
+    cfg.events["base_com"].params["asset_cfg"].body_names = ("torso_link",)
+
+    # ── viewer ───────────────────────────────────────────────────────
+
+    cfg.viewer.body_name = "torso_link"
+
+    # ── play mode overrides ──────────────────────────────────────────
+
+    if play:
+        cfg.episode_length_s = int(1e9)
+        cfg.observations["actor"].enable_corruption = False
+        cfg.events.pop("push_robot", None)
+        motion_cfg.pose_range = {}
+        motion_cfg.velocity_range = {}
+        motion_cfg.sampling_strategy = "uniform"
+
+    # ── return SceneEntityCfg helpers for per-stage reward setup ─────
 
     foot_cfg = SceneEntityCfg(
         "robot",
@@ -180,6 +289,23 @@ def g1_soccer_env_cfg(
         "robot",
         joint_names=("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"),
     )
+    return foot_cfg, waist_cfg
+
+
+# ── Stage 2: kick-to-destination on flat ground ───────────────────────────
+
+
+def g1_soccer_destination_env_cfg(
+    has_state_estimation: bool = True,
+    play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+    """Stage 2: flat ground, uniform sampling, tracking + kick rewards."""
+    cfg = make_tracking_env_cfg()
+    foot_cfg, waist_cfg = _apply_common_soccer_config(
+        cfg, has_state_estimation, play, sampling_strategy="uniform",
+    )
+
+    # ── soccer-specific rewards ──────────────────────────────────────
 
     cfg.rewards["target_point_proximity"] = RewardTermCfg(
         func=soccer_rewards.target_point_proximity,
@@ -260,70 +386,30 @@ def g1_soccer_env_cfg(
         params={"waist_cfg": waist_cfg},
     )
 
-    # Adjust tracking reward weights per HumanoidSoccer G1FlatProximityEnvCfg.
-    cfg.rewards["motion_global_root_pos"].weight = 0.0
-    cfg.rewards["motion_global_root_ori"].weight = 1.0
-    cfg.rewards["motion_body_pos"].params["body_names"] = (
-        "pelvis",
-        "left_hip_roll_link",
-        "left_knee_link",
-        "right_hip_roll_link",
-        "right_knee_link",
-        "torso_link",
-        "left_shoulder_roll_link",
-        "left_elbow_link",
-        "left_wrist_yaw_link",
-        "right_shoulder_roll_link",
-        "right_elbow_link",
-        "right_wrist_yaw_link",
-    )
-    cfg.rewards["motion_body_ori"].params["body_names"] = (
-        "pelvis",
-        "left_hip_roll_link",
-        "left_knee_link",
-        "right_hip_roll_link",
-        "right_knee_link",
-        "torso_link",
-        "left_shoulder_roll_link",
-        "left_elbow_link",
-        "left_wrist_yaw_link",
-        "right_shoulder_roll_link",
-        "right_elbow_link",
-        "right_wrist_yaw_link",
+    return cfg
+
+
+# ── Stage 1: motion-skill acquisition on gravel terrain ────────────────────
+
+
+def g1_soccer_tracking_env_cfg(
+    has_state_estimation: bool = True,
+    play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+    """Stage 1: gravel terrain, adaptive sampling, tracking rewards + soccer obs."""
+    cfg = make_tracking_env_cfg()
+    foot_cfg, waist_cfg = _apply_common_soccer_config(
+        cfg, has_state_estimation, play, sampling_strategy="adaptive",
     )
 
-    # ── terminations ─────────────────────────────────────────────────
+    # Replace flat plane with rough terrain.
+    cfg.scene.terrain = _soccer_rough_terrain_cfg()
 
-    cfg.terminations["anchor_pos"] = TerminationTermCfg(
-        func=cfg.terminations["anchor_pos"].func,
-        params={"command_name": "motion", "threshold": 0.25},
-    )
-    cfg.terminations["ee_body_pos"].params["body_names"] = (
-        "left_ankle_roll_link",
-        "right_ankle_roll_link",
-        "left_wrist_yaw_link",
-        "right_wrist_yaw_link",
-    )
+    # Heightfield terrain generates many contacts/constraints.
+    cfg.sim.nconmax = 4096
+    cfg.sim.njmax = 4096
 
-    # ── events ───────────────────────────────────────────────────────
-
-    cfg.events["foot_friction"].params["asset_cfg"].geom_names = (
-        r"^(left|right)_foot[1-7]_collision$"
-    )
-    cfg.events["base_com"].params["asset_cfg"].body_names = ("torso_link",)
-
-    # ── viewer ───────────────────────────────────────────────────────
-
-    cfg.viewer.body_name = "torso_link"
-
-    # ── play mode overrides ──────────────────────────────────────────
-
-    if play:
-        cfg.episode_length_s = int(1e9)
-        cfg.observations["actor"].enable_corruption = False
-        cfg.events.pop("push_robot", None)
-        motion_cfg.pose_range = {}
-        motion_cfg.velocity_range = {}
-        motion_cfg.sampling_strategy = "uniform"
+    # Stage 1 uses tracking rewards only — no soccer-specific rewards added.
+    # The tracking reward weights are already adjusted by the helper above.
 
     return cfg
