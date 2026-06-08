@@ -127,8 +127,8 @@ def sideways_kick(
         return reward
 
     robot = env.scene[foot_cfg.name]
-    foot_vel_w = robot.data.body_link_lin_vel_w[foot_info.env_ids][:, foot_info.body_indices]
-    foot_quat_w = robot.data.body_link_quat_w[foot_info.env_ids][:, foot_info.body_indices]
+    foot_vel_w = robot.data.body_link_lin_vel_w[foot_info.env_ids, foot_info.body_indices]
+    foot_quat_w = robot.data.body_link_quat_w[foot_info.env_ids, foot_info.body_indices]
 
     vel_local = quat_apply(quat_inv(foot_quat_w), foot_vel_w)
     vel_norm = torch.norm(vel_local, dim=-1)
