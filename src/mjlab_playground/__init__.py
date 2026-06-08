@@ -5,3 +5,5 @@ from mjlab_playground.tasks.getup.config.t1 import *  # noqa: F401, F403
 
 from mjlab_playground.tasks.tracking.config.t1 import *  # noqa: F401, F403
 from mjlab_playground.tasks.velocity.config.t1 import *  # noqa: F401, F403
+
+from mjlab_playground.tasks.soccer.config.g1 import *  # noqa: F401, F403

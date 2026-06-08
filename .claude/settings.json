@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(git push *)"
+    ]
+  }
+}
