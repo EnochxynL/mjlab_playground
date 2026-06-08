@@ -40,10 +40,15 @@ def _base_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     )
 
 
+# Both stages share the same experiment_name so that Stage 2 can naturally
+# resume from a Stage 1 checkpoint within the same log directory.
+_SOCCER_EXPERIMENT_NAME = "g1_soccer"
+
+
 def g1_soccer_destination_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     """Stage 2: kick-to-destination on flat ground (30k iterations)."""
     cfg = _base_ppo_runner_cfg()
-    cfg.experiment_name = "g1_soccer_destination"
+    cfg.experiment_name = _SOCCER_EXPERIMENT_NAME
     cfg.max_iterations = 30_000
     return cfg
 
@@ -51,6 +56,6 @@ def g1_soccer_destination_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
 def g1_soccer_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     """Stage 1: motion-skill acquisition on gravel terrain (4k iterations)."""
     cfg = _base_ppo_runner_cfg()
-    cfg.experiment_name = "g1_soccer_tracking"
+    cfg.experiment_name = _SOCCER_EXPERIMENT_NAME
     cfg.max_iterations = 4_000
     return cfg
