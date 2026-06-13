@@ -170,11 +170,11 @@ def _apply_common_soccer_config(
         },
         joint_position_range=(-0.52, 0.52),
         sampling_strategy=sampling_strategy,
-        curve_offset_range={
-            "radius": (-0.25, 0.25),
-            "arc_angle": math.pi / 9,
-            "height": SOCCER_BALL_RADIUS,
-        },
+        curve_offset_range=soccer_commands.SoccerCurveOffsetCfg(
+            radius=(-0.25, 0.25),
+            arc_angle=math.pi / 9,
+            height=SOCCER_BALL_RADIUS,
+        ),
         blind_distance_min_range=(0.2, 0.8),
         blind_distance_max_range=(1.8, 2.5),
     )

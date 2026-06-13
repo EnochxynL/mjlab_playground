@@ -251,16 +251,16 @@ class SoccerMotionCommand(MotionCommand):
         self.curve_radius_offset = torch.zeros(self.num_envs, device=self.device)
         self._radius_offset_min: float | None = None
         self._radius_offset_max: float | None = None
-        curve_cfg = cfg.curve_offset_range or {}
-        radius_range = curve_cfg.get("radius")
-        if isinstance(radius_range, (list, tuple)) and len(radius_range) >= 2:
-            self._radius_offset_min = float(radius_range[0])
-            self._radius_offset_max = float(radius_range[1])
-        elif radius_range is not None:
-            self._radius_offset_min = float(radius_range)
-            self._radius_offset_max = float(radius_range)
-        self._target_arc_angle = float(curve_cfg.get("arc_angle", math.pi / 18.0))
-        self._target_height = float(curve_cfg.get("height", 0.11))
+        curve_cfg = cfg.curve_offset_range or SoccerCurveOffsetCfg()
+        if isinstance(curve_cfg.radius, (list, tuple)) and len(curve_cfg.radius) >= 2:
+            self._radius_offset_min = float(curve_cfg.radius[0])
+            self._radius_offset_max = float(curve_cfg.radius[1])
+        elif curve_cfg.radius is not None:
+            r = float(curve_cfg.radius)
+            self._radius_offset_min = r
+            self._radius_offset_max = r
+        self._target_arc_angle = float(curve_cfg.arc_angle)
+        self._target_height = float(curve_cfg.height)
 
         # Kick contact tracker
         self._state_prefix = "_motion"
@@ -717,6 +717,15 @@ class SoccerMotionCommand(MotionCommand):
             self._current_bin_failed.zero_()
 
 
+@dataclass
+class SoccerCurveOffsetCfg:
+    """Parameters for placing the ball on an arc relative to the kick foot."""
+
+    radius: tuple[float, float] = (-0.25, 0.25)
+    arc_angle: float = math.pi / 18.0
+    height: float = 0.11
+
+
 @dataclass(kw_only=True)
 class SoccerMotionCommandCfg(CommandTermCfg):
     """Configuration for the soccer motion command."""
@@ -733,7 +742,7 @@ class SoccerMotionCommandCfg(CommandTermCfg):
     adaptive_lambda: float = 0.1
     adaptive_uniform_ratio: float = 0.1
     adaptive_alpha: float = 0.4
-    curve_offset_range: dict | None = None
+    curve_offset_range: SoccerCurveOffsetCfg | None = None
     enable_soccer_ball_init_vel: bool = False
     soccer_ball_init_lin_vel_range: dict[str, tuple[float, float]] | None = None
     blind_distance_min_range: tuple[float, float] = (0.3, 0.5)

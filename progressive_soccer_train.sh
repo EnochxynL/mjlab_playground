@@ -44,16 +44,22 @@ MOTION_FILES=(
     "${MOTION_DIR}/soccer-standard-010_right.npz"
 )
 
-MOTION_ARGS=()
-for f in "${MOTION_FILES[@]}"; do
-    MOTION_ARGS+=("$f")
+# Build JSON array string for tyro's UsePythonSyntaxForLiteralCollections
+_MOTION_JSON="["
+for i in "${!MOTION_FILES[@]}"; do
+    _MOTION_JSON+="\"${MOTION_FILES[$i]}\""
+    if [[ $i -lt $((${#MOTION_FILES[@]} - 1)) ]]; then
+        _MOTION_JSON+=", "
+    fi
 done
+_MOTION_JSON+="]"
 
 # ── train parameters (override via env vars) ───────────────────
 
 NUM_ENVS="${NUM_ENVS:-4096}"
 STAGE1_ITERS="${STAGE1_ITERS:-4000}"
 STAGE2_ITERS="${STAGE2_ITERS:-30000}"
+LOGGER="${LOGGER:-tensorboard}"  # tensorboard or wandb
 
 cd "${REPO_ROOT}"
 
@@ -67,10 +73,11 @@ echo " max_iters: ${STAGE1_ITERS}"
 echo "=============================================="
 
 python -m mjlab.scripts.train Mjlab-SoccerTracking-Terrain-G1 \
-    --env.commands.motion.motion_files "${MOTION_ARGS[@]}" \
+    --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE1_ITERS}" \
-    --agent.run_name "${RUN_NAME}"
+    --agent.run_name "${RUN_NAME}" \
+    --agent.logger "${LOGGER}"
 
 # ── resolve Stage 1 run directory ─────────────────────────────
 
@@ -97,7 +104,7 @@ echo " max_iters: ${STAGE2_ITERS}"
 echo "=============================================="
 
 python -m mjlab.scripts.train Mjlab-SoccerDestination-Flat-G1 \
-    --env.commands.motion.motion_files "${MOTION_ARGS[@]}" \
+    --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE2_ITERS}" \
     --agent.run_name "${RUN_NAME}_resume" \
