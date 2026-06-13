@@ -2,12 +2,12 @@
 # ──────────────────────────────────────────────────────────────
 # Progressive soccer training: two-stage pipeline for G1.
 #
-# Stage 1 (Mjlab-SoccerTracking-Terrain-G1):
-#   gravel terrain, adaptive sampling, tracking rewards only.
+# Stage 1 (Mjlab-SoccerTracking-G1):
+#   adaptive sampling, tracking rewards only + soccer observations.
 #   Learns to reproduce kick motions without ball contact.
 #
-# Stage 2 (Mjlab-SoccerDestination-Flat-G1):
-#   flat ground, uniform sampling, full kick rewards.
+# Stage 2 (Mjlab-SoccerDestination-G1):
+#   uniform sampling, tracking + full kick rewards.
 #   Fine-tunes Stage 1 checkpoint to actually kick the ball.
 #
 # Usage:
@@ -66,13 +66,13 @@ cd "${REPO_ROOT}"
 # ── Stage 1: motion-skill acquisition ─────────────────────────
 
 echo "=============================================="
-echo " Stage 1: Mjlab-SoccerTracking-Terrain-G1"
+echo " Stage 1: Mjlab-SoccerTracking-G1"
 echo " run_name: ${RUN_NAME}"
 echo " num_envs: ${NUM_ENVS}"
 echo " max_iters: ${STAGE1_ITERS}"
 echo "=============================================="
 
-python -m mjlab.scripts.train Mjlab-SoccerTracking-Terrain-G1 \
+python -m mjlab.scripts.train Mjlab-SoccerTracking-G1 \
     --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE1_ITERS}" \
@@ -96,14 +96,14 @@ echo ""
 # ── Stage 2: kick-to-destination fine-tuning ──────────────────
 
 echo "=============================================="
-echo " Stage 2: Mjlab-SoccerDestination-Flat-G1"
+echo " Stage 2: Mjlab-SoccerDestination-G1"
 echo " load_run: ${LOAD_RUN}"
 echo " run_name: ${RUN_NAME}_resume"
 echo " num_envs: ${NUM_ENVS}"
 echo " max_iters: ${STAGE2_ITERS}"
 echo "=============================================="
 
-python -m mjlab.scripts.train Mjlab-SoccerDestination-Flat-G1 \
+python -m mjlab.scripts.train Mjlab-SoccerDestination-G1 \
     --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE2_ITERS}" \

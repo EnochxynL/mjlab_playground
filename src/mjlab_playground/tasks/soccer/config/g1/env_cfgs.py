@@ -4,10 +4,8 @@ Inherits from the mjlab tracking task and adds soccer-specific entities,
 observations, and rewards ported from HumanoidSoccer (arXiv-2602.05310v1).
 
 Two stages:
-  Stage 1 (Mjlab-SoccerTracking-Terrain-G1):  gravel terrain, adaptive sampling,
-                                              tracking rewards only, soccer obs.
-  Stage 2 (Mjlab-SoccerDestination-Flat-G1):  flat ground, uniform sampling,
-                                              tracking + kick rewards, soccer obs.
+  Stage 1 (Mjlab-SoccerTracking-G1):   adaptive sampling + tracking rewards only.
+  Stage 2 (Mjlab-SoccerDestination-G1): uniform sampling + kick rewards.
 """
 
 import math
@@ -26,8 +24,6 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
-from mjlab.terrains import TerrainEntityCfg, TerrainGeneratorCfg
-from mjlab.terrains.heightfield_terrains import HfRandomUniformTerrainCfg
 
 from ...mdp import commands as soccer_commands
 from ...mdp import observations as soccer_obs
@@ -48,32 +44,6 @@ def get_soccer_ball_cfg() -> EntityCfg:
         init_state=EntityCfg.InitialStateCfg(
             pos=(0.7, 0.0, SOCCER_BALL_RADIUS),
         ),
-    )
-
-
-# ── terrain config (Stage 1) ───────────────────────────────────────────────
-
-_SOCCER_TERRAIN_CFG = TerrainGeneratorCfg(
-    size=(8.0, 8.0),
-    border_width=20.0,
-    num_rows=10,
-    num_cols=20,
-    curriculum=False,
-    sub_terrains={
-        "random_rough": HfRandomUniformTerrainCfg(
-            proportion=1.0,
-            noise_range=(-0.02, 0.02),
-            noise_step=0.02,
-        ),
-    },
-)
-
-
-def _soccer_rough_terrain_cfg() -> TerrainEntityCfg:
-    """Rough terrain matching HumanoidSoccer G1TerrainEnvCfg."""
-    return TerrainEntityCfg(
-        terrain_type="generator",
-        terrain_generator=_SOCCER_TERRAIN_CFG,
     )
 
 
@@ -292,7 +262,7 @@ def _apply_common_soccer_config(
     return foot_cfg, waist_cfg
 
 
-# ── Stage 2: kick-to-destination on flat ground ───────────────────────────
+# ── Stage 2: kick-to-destination ─────────────────────────────────────────
 
 
 def g1_soccer_destination_env_cfg(
@@ -389,27 +359,21 @@ def g1_soccer_destination_env_cfg(
     return cfg
 
 
-# ── Stage 1: motion-skill acquisition on gravel terrain ────────────────────
+# ── Stage 1: motion-skill acquisition ─────────────────────────────────────
 
 
 def g1_soccer_tracking_env_cfg(
     has_state_estimation: bool = True,
     play: bool = False,
 ) -> ManagerBasedRlEnvCfg:
-    """Stage 1: gravel terrain, adaptive sampling, tracking rewards + soccer obs."""
+    """Stage 1: flat ground, adaptive sampling, tracking rewards + soccer obs."""
     cfg = make_tracking_env_cfg()
     foot_cfg, waist_cfg = _apply_common_soccer_config(
         cfg, has_state_estimation, play, sampling_strategy="adaptive",
     )
 
-    # Replace flat plane with rough terrain.
-    cfg.scene.terrain = _soccer_rough_terrain_cfg()
-
-    # Heightfield terrain generates many contacts/constraints.
-    cfg.sim.nconmax = 4096
-    cfg.sim.njmax = 4096
-
     # Stage 1 uses tracking rewards only — no soccer-specific rewards added.
     # The tracking reward weights are already adjusted by the helper above.
+    # Terrain stays as default flat plane (same memory footprint as Stage 2).
 
     return cfg
