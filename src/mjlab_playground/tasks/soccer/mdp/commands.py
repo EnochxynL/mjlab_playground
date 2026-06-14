@@ -178,8 +178,12 @@ class SoccerMotionCommand(MotionCommand):
         if hasattr(env.scene, "entities") and "soccer_ball" in env.scene.entities:
             self.soccer_ball = env.scene["soccer_ball"]
 
-        # Multi-motion loader
-        self.motion = MultiMotionLoader(cfg.motion_files, self.body_indexes, device=self.device)
+        # Multi-motion loader — fall back to singular motion_file for
+        # compatibility with play.py's --motion-file CLI.
+        motion_files = list(cfg.motion_files) if cfg.motion_files else []
+        if not motion_files and cfg.motion_file:
+            motion_files = [cfg.motion_file]
+        self.motion = MultiMotionLoader(motion_files, self.body_indexes, device=self.device)
         kick_leg_to_id = {"left": 0, "right": 1}
         self._kick_leg_id_to_name = {v: k for k, v in kick_leg_to_id.items()}
         self._kick_leg_id_to_name[-1] = "unknown"
@@ -261,6 +265,10 @@ class SoccerMotionCommand(MotionCommand):
             self._radius_offset_max = r
         self._target_arc_angle = float(curve_cfg.arc_angle)
         self._target_height = float(curve_cfg.height)
+
+        # Ghost model for visualization (created lazily on first use)
+        self._ghost_model = None
+        self._ghost_color = np.array(cfg.viz.ghost_color, dtype=np.float32)
 
         # Kick contact tracker
         self._state_prefix = "_motion"
@@ -731,6 +739,7 @@ class SoccerMotionCommandCfg(CommandTermCfg):
     """Configuration for the soccer motion command."""
 
     motion_files: list[str] = field(default_factory=list)
+    motion_file: str = ""  # Singular alias for compatibility with play.py --motion-file
     anchor_body_name: str = ""
     body_names: tuple[str, ...] = ()
     entity_name: str = "robot"
