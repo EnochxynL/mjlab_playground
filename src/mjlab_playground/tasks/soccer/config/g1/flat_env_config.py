@@ -25,7 +25,7 @@ from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
-from ...mdp import commands as soccer_commands
+from ...mdp import commands_multi_motion_soccer as soccer_commands  # MJLab: IsaacLab imports commands_multi_motion_soccer
 from ...mdp import observations as soccer_obs
 from ...mdp import rewards as soccer_rewards
 
@@ -101,10 +101,8 @@ def _apply_common_soccer_config(
 
     # ── commands ─────────────────────────────────────────────────────
 
-    motion_cfg = soccer_commands.SoccerMotionCommandCfg(
+    motion_cfg = soccer_commands.MotionCommandCfg(  # MJLab: SoccerMotionCommandCfg → MotionCommandCfg
         entity_name="robot",
-        resampling_time_range=(1.0e9, 1.0e9),
-        debug_vis=True,
         anchor_body_name="torso_link",
         body_names=(
             "pelvis",
@@ -140,11 +138,12 @@ def _apply_common_soccer_config(
         },
         joint_position_range=(-0.52, 0.52),
         sampling_strategy=sampling_strategy,
-        curve_offset_range=soccer_commands.SoccerCurveOffsetCfg(
-            radius=(-0.25, 0.25),
-            arc_angle=math.pi / 9,
-            height=SOCCER_BALL_RADIUS,
-        ),
+        # MJLab: SoccerCurveOffsetCfg → plain dict (IsaacLab uses dict-based curve_offset_range)
+        curve_offset_range={  # MJLab: curve_offset_range is a dict in IsaacLab MotionCommandCfg
+            "radius": (-0.25, 0.25),
+            "arc_angle": math.pi / 9,
+            "height": SOCCER_BALL_RADIUS,
+        },
         blind_distance_min_range=(0.2, 0.8),
         blind_distance_max_range=(1.8, 2.5),
     )
@@ -154,7 +153,7 @@ def _apply_common_soccer_config(
 
     actor_terms = dict(cfg.observations["actor"].terms)
     actor_terms["target_point_pos"] = ObservationTermCfg(
-        func=soccer_obs.target_point_pos_local,
+        func=soccer_obs.constant_target_point_pos,  # MJLab: IsaacLab uses constant_target_point_pos
         params={"command_name": "motion"},
     )
     actor_terms["target_destination_pos_local"] = ObservationTermCfg(
@@ -169,7 +168,7 @@ def _apply_common_soccer_config(
 
     critic_terms = dict(cfg.observations["critic"].terms)
     critic_terms["target_point_pos"] = ObservationTermCfg(
-        func=soccer_obs.target_point_pos_local,
+        func=soccer_obs.constant_target_point_pos,  # MJLab: IsaacLab uses constant_target_point_pos
         params={"command_name": "motion"},
     )
     critic_terms["target_destination_pos_local"] = ObservationTermCfg(
@@ -244,6 +243,7 @@ def _apply_common_soccer_config(
     if play:
         cfg.episode_length_s = int(1e9)
         cfg.observations["actor"].enable_corruption = False
+        cfg.terminations = {}
         cfg.events.pop("push_robot", None)
         motion_cfg.pose_range = {}
         motion_cfg.velocity_range = {}

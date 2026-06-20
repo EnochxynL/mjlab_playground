@@ -5,16 +5,17 @@ Ported from HumanoidSoccer (arXiv-2602.05310v1) and adapted for mjlab.
 
 from __future__ import annotations
 
+import math
+import torch
 from typing import TYPE_CHECKING
 
-import torch
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.utils.lab_api.math import matrix_from_quat, subtract_frame_transforms, quat_apply, quat_inv
 
-from mjlab.utils.lab_api.math import quat_apply, quat_inv
-
-from .commands import SoccerMotionCommand
+from .commands_multi_motion_soccer import MotionCommand  # MJLab: IsaacLab imports from commands_multi_motion_soccer
 
 if TYPE_CHECKING:
-    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.envs import ManagerBasedRlEnv as ManagerBasedEnv  # MJLab: ManagerBasedEnv → ManagerBasedRlEnv
 
 
 def robot_anchor_ori_w(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
@@ -94,14 +95,16 @@ def motion_anchor_ang_vel(env: ManagerBasedEnv, command_name: str) -> torch.Tens
     return command.anchor_ang_vel_w.view(env.num_envs, -1)
 
 
-def _get_motion_command(env: ManagerBasedRlEnv, command_name: str) -> SoccerMotionCommand:
-    cmd = env.command_manager.get_term(command_name)
-    if cmd is None:
+def _get_motion_command(env: ManagerBasedEnv, command_name: str) -> MotionCommand:
+    command: MotionCommand | None = env.command_manager.get_term(command_name)
+    if command is None:
         raise RuntimeError(f"motion command '{command_name}' not found in env.command_manager")
-    return cmd
+    if not hasattr(command, "target_point_pos"):
+        raise RuntimeError(f"motion command '{command_name}' lacks target_point_pos attribute")
+    return command
 
 
-def get_target_point_world(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+def get_target_point_world(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
     command = _get_motion_command(env, command_name)
     target_local = command.target_point_pos
     env_origins = getattr(env.scene, "env_origins", None)
@@ -110,7 +113,7 @@ def get_target_point_world(env: ManagerBasedRlEnv, command_name: str) -> torch.T
     return target_local
 
 
-def get_target_point_base(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+def get_target_point_base(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
     command = _get_motion_command(env, command_name)
     target_world = get_target_point_world(env, command_name)
     # delta = target_world - command.robot_anchor_pos_w
@@ -142,8 +145,7 @@ def _positional_encoding(vec: torch.Tensor, num_freqs: int = 6) -> torch.Tensor:
     return torch.cat([vec.view(vec.shape[0], -1), sin_cos], dim=-1)
 
 
-def target_point_pos_first_frame(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Target point in robot base frame, frozen at first frame of each episode."""
+def target_point_pos_first_frame(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
     cache_name = f"_{command_name}_target_point_cache"
     target_local = get_target_point_base(env, command_name)
 
@@ -152,10 +154,14 @@ def target_point_pos_first_frame(env: ManagerBasedRlEnv, command_name: str) -> t
         cache = target_local.clone()
         setattr(env, cache_name, cache)
 
-    step_buf = env.episode_length_buf
-    first_step_mask = step_buf == 0
+    step_buf = getattr(env, "episode_length_buf", None)
+    if step_buf is None:
+        raise AttributeError("ManagerBasedEnv missing episode_length_buf required for target point caching")
+
+    first_step_mask = (step_buf == 0)
     if torch.any(first_step_mask):
         cache = getattr(env, cache_name)
+        # Only refresh the cache when an environment just reset so the policy keeps the first-frame cue.
         cache[first_step_mask] = target_local[first_step_mask]
         setattr(env, cache_name, cache)
     # Return cached target vector.
@@ -170,11 +176,12 @@ def constant_target_point_pos(env: ManagerBasedEnv, command_name: str = "motion"
     return _positional_encoding(base, num_freqs=6)
 
 
-def blind_zone_target_point_pos(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Target point with blind-zone simulation.
-
-    If robot-ball (x,y) distance is outside [blind_distance_min, blind_distance_max],
-    returns the last visible position to emulate limited visibility.
+def blind_zone_target_point_pos(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
+    """Return target point in robot base frame with blind-zone simulation.
+    
+    If robot-ball (x, y) distance is outside [blind_distance_min, blind_distance_max],
+    return the last visible position to emulate limited visibility.
+    Thresholds are resampled from MotionCommandCfg ranges at each resample.
     """
     command = _get_motion_command(env, command_name)
     
@@ -208,12 +215,11 @@ def blind_zone_target_point_pos(env: ManagerBasedRlEnv, command_name: str) -> to
     return result
 
 
-def target_destination_pos_local(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Target destination in robot pelvis frame."""
-    command = _get_motion_command(env, command_name)
+def target_destination_pos_local(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
     if not hasattr(command, "target_destination_pos"):
-        return torch.zeros(env.num_envs, 3, device=env.device)
-
+        raise RuntimeError(f"motion command '{command_name}' lacks target_destination_pos attribute")
+    # target_destination_pos is local to env origin; convert to world before subtracting robot pose.
     env_origins = getattr(env.scene, "env_origins", None)
     if env_origins is not None:
         target_world = command.target_destination_pos + env_origins
@@ -225,8 +231,7 @@ def target_destination_pos_local(env: ManagerBasedRlEnv, command_name: str) -> t
     return quat_apply(quat_inv(command.robot_pelvis_quat_w), delta)
 
 
-def target_destination_pos_local_first_frame(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-    """Target destination in base frame, frozen at first frame of each episode."""
+def target_destination_pos_local_first_frame(env: ManagerBasedEnv, command_name: str = "motion") -> torch.Tensor:
     cache_name = f"_{command_name}_target_destination_local_cache"
     target_local = target_destination_pos_local(env, command_name)
 
@@ -235,7 +240,10 @@ def target_destination_pos_local_first_frame(env: ManagerBasedRlEnv, command_nam
         cache = target_local.clone()
         setattr(env, cache_name, cache)
 
-    step_buf = env.episode_length_buf
+    step_buf = getattr(env, "episode_length_buf", None)
+    if step_buf is None:
+        raise AttributeError("ManagerBasedEnv missing episode_length_buf required for target destination caching")
+
     first_step_mask = (step_buf == 0)
     if torch.any(first_step_mask):
         cache = getattr(env, cache_name)
@@ -252,7 +260,7 @@ def target_destination_pos_local_first_frame(env: ManagerBasedRlEnv, command_nam
 def foot_target_point_distance(env: ManagerBasedEnv, robot_cfg: SceneEntityCfg, command_name: str = "motion",) -> torch.Tensor:
     command = _get_motion_command(env, command_name)
     robot = env.scene[robot_cfg.name]
-    foot_pos = robot.data.body_pos_w[:, robot_cfg.body_ids]
+    foot_pos = robot.data.body_link_pos_w[:, robot_cfg.body_ids]  # MJLab: body_pos_w → body_link_pos_w
     target_world = get_target_point_world(env, command_name)
     diff = foot_pos - target_world.unsqueeze(1)
     dist = torch.linalg.norm(diff, dim=-1)

@@ -1,40 +1,50 @@
-"""Soccer-specific reward functions ported from HumanoidSoccer (arXiv-2602.05310v1)."""
-
 from __future__ import annotations
 
+import torch
 from typing import TYPE_CHECKING
 
-import torch
+from mjlab.managers.scene_entity_config import SceneEntityCfg  # MJLab: isaaclab.managers → mjlab.managers.scene_entity_config
+from mjlab.sensor.contact_sensor import ContactSensor  # MJLab: isaaclab.sensors → mjlab.sensor.contact_sensor
+from mjlab.utils.lab_api.math import quat_error_magnitude, quat_apply, quat_inv, quat_apply_inverse  # MJLab: isaaclab.utils.math → mjlab.utils.lab_api.math
 
-from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse, quat_inv
-
-from .kick_detection import KickContactTracker
-from .commands import SoccerMotionCommand
+from .commands_multi_motion_soccer import MotionCommand  # MJLab: IsaacLab imports from commands_multi_motion_soccer
 from .observations import get_target_point_world
+from .kick_detection import KickContactTracker
+
 
 if TYPE_CHECKING:
-    from mjlab.envs import ManagerBasedRlEnv
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from mjlab.envs import ManagerBasedRlEnv as ManagerBasedRLEnv  # MJLab: ManagerBasedRLEnv → ManagerBasedRlEnv, aliased back for line matching
 
 
-def _get_command(env: ManagerBasedRlEnv, command_name: str) -> SoccerMotionCommand:
-    cmd = env.command_manager.get_term(command_name)
-    if cmd is None:
-        raise RuntimeError(f"command '{command_name}' not found")
-    return cmd
+def _get_body_indexes(command: MotionCommand, body_names: list[str] | None) -> list[int]:
+    return [i for i, name in enumerate(command.cfg.body_names) if (body_names is None) or (name in body_names)]
 
 
-def _resolve_body_ids(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg) -> list[int]:
-    ids = foot_cfg.body_ids
-    if isinstance(ids, slice):
-        robot = env.scene[foot_cfg.name]
-        names = list(robot.body_names)
-        return [names.index(n) for n in foot_cfg.body_names]
-    return list(ids)
+def _map_names_to_indices(source_names: list[str], target_names: list[str]) -> list[int]:
+    target_list = list(target_names)
+    name_to_index = {name: idx for idx, name in enumerate(target_list)}
+    indices: list[int] = []
+    # Iterate all source names to map.
+    for name in source_names:
+        # Prefer exact matching for deterministic mapping.
+        if name in name_to_index:
+            indices.append(name_to_index[name])
+            continue
+        # If exact matching fails, attempt unique suffix matching.
+        suffix_matches = [idx for idx, candidate in enumerate(target_list) if candidate.endswith(name)]
+        # Accept only unique suffix matches to avoid ambiguity.
+        if len(suffix_matches) == 1:
+            indices.append(suffix_matches[0])
+    return indices
 
 
+def action_rate_l2_clip(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalize the rate of change of the actions using L2 squared kernel."""
+    reward = torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=1)
+    return reward.clamp(max=100.0)
 
-def waist_action_rate_l2_clip(env: ManagerBasedRlEnv, waist_cfg: SceneEntityCfg | None = None) -> torch.Tensor:
+
+def waist_action_rate_l2_clip(env: ManagerBasedRLEnv, waist_cfg: SceneEntityCfg | None = None) -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
     if waist_cfg is None:
         raise ValueError("waist_cfg cannot be None")
@@ -43,7 +53,7 @@ def waist_action_rate_l2_clip(env: ManagerBasedRlEnv, waist_cfg: SceneEntityCfg 
     return torch.sum(torch.square(env.action_manager.action[:, idx] - env.action_manager.prev_action[:, idx]), dim=1).clamp(max=100.0)
 
 
-def _get_kick_tracker(command: SoccerMotionCommand) -> KickContactTracker:
+def _get_kick_tracker(command: MotionCommand) -> KickContactTracker:
     tracker = getattr(command, "kick_contact_tracker", None)
     if tracker is None:
         raise RuntimeError("MotionCommand is missing kick_contact_tracker; ensure command setup is up to date.")
@@ -73,20 +83,14 @@ def motion_relative_body_position_error_exp(
     return torch.exp(-error.mean(-1) / std**2)
 
 def motion_relative_foot_position_error_exp(
-    env: ManagerBasedRlEnv, command_name: str, std: float, foot_body_names: list[str] | None = None
+    env: ManagerBasedRLEnv, command_name: str, std: float, foot_body_names: list[str] | None = None
 ) -> torch.Tensor:
     if foot_body_names is None:
         foot_body_names = ["left_ankle_roll_link", "right_ankle_roll_link"]
-    command = _get_command(env, command_name)
-    body_indexes = [
-        i for i, name in enumerate(command.cfg.body_names) if name in foot_body_names
-    ]
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    body_indexes = _get_body_indexes(command, foot_body_names)
     error = torch.sum(
-        torch.square(
-            command.body_pos_relative_w[:, body_indexes]
-            - command.robot_body_pos_w[:, body_indexes]
-        ),
-        dim=-1,
+        torch.square(command.body_pos_relative_w[:, body_indexes] - command.robot_body_pos_w[:, body_indexes]), dim=-1
     )
     return torch.exp(-error.mean(-1) / std**2)
 
@@ -132,24 +136,25 @@ def feet_contact_time(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, thresh
     reward = torch.sum((last_contact_time < threshold) * first_air, dim=-1)
     return reward
 
-def foot_distance(env: ManagerBasedRlEnv, threshold: float, std: float, foot_cfg: SceneEntityCfg | None = None,) -> torch.Tensor:
-    """Encourage minimum separation between feet to avoid crossing."""
+def foot_distance(env: ManagerBasedRLEnv, threshold: float, std: float, foot_cfg: SceneEntityCfg | None = None,) -> torch.Tensor:
+    """Encourage a minimum separation between both feet to avoid crossing/overlap."""
     if foot_cfg is None:
         raise ValueError("foot_distance requires foot_cfg to identify feet.")
     robot = env.scene[foot_cfg.name]
-    body_ids = _resolve_body_ids(env, foot_cfg)
-    left_pos = robot.data.body_link_pos_w[:, body_ids[0]]  # [num_envs, 3]
-    right_pos = robot.data.body_link_pos_w[:, body_ids[1]]  # [num_envs, 3]
-    distance = torch.norm(left_pos - right_pos, dim=1)  # [num_envs]
+    left_foot_idx = foot_cfg.body_ids[0]
+    right_foot_idx = foot_cfg.body_ids[1]
+    left_foot_pos = robot.data.body_link_pos_w[:, left_foot_idx]  # MJLab: body_pos_w → body_link_pos_w
+    right_foot_pos = robot.data.body_link_pos_w[:, right_foot_idx]  # MJLab: body_pos_w → body_link_pos_w
+    distance = torch.norm(left_foot_pos - right_foot_pos, dim=1)  # [num_envs]
     reward = torch.where(
         distance >= threshold,
-        torch.tensor(1.0, device=distance.device),
-        torch.exp(-((distance / threshold - 1) ** 2) / (std**2)),
+        torch.tensor(1., device=distance.device),
+        1.0 * torch.exp(-((distance / threshold - 1)**2) / (std ** 2))
     )
     return reward
 
 
-def feet_slip_penalty(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg, slip_force_threshold: float,) -> torch.Tensor:
+def feet_slip_penalty(env: ManagerBasedRLEnv, foot_cfg: SceneEntityCfg, slip_force_threshold: float,) -> torch.Tensor:
     """Penalize foot linear velocity when the foot is in contact.
 
     A contact is detected when the contact force sensor reports an upward (positive Z)
@@ -174,15 +179,15 @@ def feet_slip_penalty(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg, slip_for
     num_envs = env.num_envs
     forces = None
     forces_data = contact_sensor.data
-    if hasattr(forces_data, "net_forces_w_history"):
-        forces_hist = forces_data.net_forces_w_history
+    if hasattr(forces_data, "force_history"):  # MJLab: net_forces_w_history → force_history
+        forces_hist = forces_data.force_history  # MJLab: net_forces_w_history → force_history
         if forces_hist.numel() > 0:
             forces = forces_hist.to(device)
             if forces.ndim >= 4:
                 forces = forces.max(dim=1).values
     if forces is None:
-        if hasattr(forces_data, "net_forces_w"):
-            forces = forces_data.net_forces_w
+        if hasattr(forces_data, "force"):  # MJLab: net_forces_w → force
+            forces = forces_data.force  # MJLab: net_forces_w → force
             if forces is not None and forces.numel() > 0:
                 forces = forces.to(device)
             else:
@@ -198,7 +203,7 @@ def feet_slip_penalty(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg, slip_for
     if not hasattr(contact_sensor, '_foot_indices_cache'):
         contact_sensor._foot_indices_cache = {}
     if foot_indices_key not in contact_sensor._foot_indices_cache:
-        foot_sensor_indices = contact_sensor.find_bodies(foot_cfg.body_names, preserve_order=True)[0]
+        foot_sensor_indices = robot.find_bodies(foot_cfg.body_names, preserve_order=True)[0]  # MJLab: ContactSensor.find_bodies not available, use robot.find_bodies
         contact_sensor._foot_indices_cache[foot_indices_key] = torch.as_tensor(
             foot_sensor_indices, device=device, dtype=torch.long
         )
@@ -209,7 +214,7 @@ def feet_slip_penalty(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg, slip_for
         return torch.zeros(num_envs, device=device, dtype=torch.float32)
     vertical_forces = forces[:, foot_indices, 2]
     contact_mask = vertical_forces > slip_force_threshold
-    foot_vel_w = robot.data.body_lin_vel_w[:, foot_indices]
+    foot_vel_w = robot.data.body_link_lin_vel_w[:, foot_indices]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
     penalize = torch.where(
         contact_mask.unsqueeze(-1), 
         torch.square(foot_vel_w), 
@@ -221,9 +226,9 @@ def feet_slip_penalty(env: ManagerBasedRlEnv, foot_cfg: SceneEntityCfg, slip_for
         return torch.sum(penalize, dim=(1, 2))
     
 
-def target_point_proximity(env: ManagerBasedRlEnv, std: float, command_name: str = "motion",) -> torch.Tensor:
+def target_point_proximity(env: ManagerBasedRLEnv, std: float, command_name: str = "motion",) -> torch.Tensor:
     """Reward proximity to the target point (ball) and freeze at first kick contact."""
-    command = _get_command(env, command_name)
+    command: MotionCommand = env.command_manager.get_term(command_name)
     tracker = _get_kick_tracker(command)
     
     # Compute current proximity reward.
@@ -249,14 +254,14 @@ def target_point_proximity(env: ManagerBasedRlEnv, std: float, command_name: str
     return reward
 
 
-def target_point_contact(env: ManagerBasedRlEnv, 
+def target_point_contact(env: ManagerBasedRLEnv, 
         horizontal_force_threshold: float = 0.0,
         command_name: str = "motion",
         ball_sensor_name: str = "soccer_ball_contact",
         foot_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
     """One-shot reward for contacting the ball at first valid touch."""
-    command = _get_command(env, command_name)
+    command: MotionCommand = env.command_manager.get_term(command_name)
     tracker = _get_kick_tracker(command)
     event = tracker.detect(command, ball_sensor_name, horizontal_force_threshold)
 
@@ -280,7 +285,7 @@ def target_point_contact(env: ManagerBasedRlEnv,
     return event.new_contact.to(reward.dtype) * reward_scale
 
 def sideways_kick(
-    env: ManagerBasedRlEnv,
+    env: ManagerBasedRLEnv,
     command_name: str = "motion",
     ball_sensor_name: str = "soccer_ball_contact",
     horizontal_force_threshold: float = 0.0,
@@ -292,7 +297,7 @@ def sideways_kick(
     if foot_cfg is None:
         raise ValueError("sideways_kick_reward requires foot_cfg to identify kicking feet.")
 
-    command = _get_command(env, command_name)
+    command: MotionCommand = env.command_manager.get_term(command_name)
     tracker = _get_kick_tracker(command)
     event = tracker.detect(command, ball_sensor_name, horizontal_force_threshold)
 
@@ -304,15 +309,17 @@ def sideways_kick(
     if foot_info.env_ids.numel() == 0:
         return reward
 
-    robot = env.scene[foot_cfg.name]
-    foot_vel_w = robot.data.body_link_lin_vel_w[foot_info.env_ids, foot_info.body_indices]
-    foot_quat_w = robot.data.body_link_quat_w[foot_info.env_ids, foot_info.body_indices]
+    robot = command.robot
+    foot_vel_w = robot.data.body_link_lin_vel_w[foot_info.env_ids, foot_info.body_indices]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
+    foot_quat_w = robot.data.body_link_quat_w[foot_info.env_ids, foot_info.body_indices]  # MJLab: body_quat_w → body_link_quat_w
 
     vel_local = quat_apply(quat_inv(foot_quat_w), foot_vel_w)
     vel_norm = torch.norm(vel_local, dim=-1)
 
     expected_leg = foot_info.expected.to(device=env.device, dtype=torch.int8)
-    desired_sign = torch.where(expected_leg == 0, -1.0, 1.0)
+    desired_sign = torch.zeros(expected_leg.shape, device=env.device, dtype=torch.float32)
+    desired_sign = torch.where(expected_leg == 0, torch.full_like(desired_sign, -1.0), desired_sign)
+    desired_sign = torch.where(expected_leg == 1, torch.full_like(desired_sign, 1.0), desired_sign)
 
     directional_component = vel_local[:, 1] * desired_sign
     axis_component = torch.clamp(directional_component, min=0.0)
@@ -332,7 +339,7 @@ def sideways_kick(
 
 
 def ball_velocity_direction_alignment(
-    env: ManagerBasedRlEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
+    env: ManagerBasedRLEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
     horizontal_force_threshold: float = 0.0,
     ball_sensor_name: str = "soccer_ball_contact",
     foot_cfg: SceneEntityCfg | None = None,
@@ -341,9 +348,9 @@ def ball_velocity_direction_alignment(
 
     Active only for a short window after contact with the expected foot.
     """
-    command = _get_command(env, command_name)
+    command: MotionCommand = env.command_manager.get_term(command_name)
     soccer_ball = env.scene["soccer_ball"]
-    vel = soccer_ball.data.root_link_lin_vel_w  # [num_envs, 3]
+    vel = soccer_ball.data.root_link_lin_vel_w  # MJLab: root_lin_vel_w → root_link_lin_vel_w
     vel_xy = vel[:, :2]  # x-y plane projection
     vel_xy_norm = torch.norm(vel_xy, dim=-1, keepdim=True)
     vel_norm = torch.norm(vel, dim=-1, keepdim=True)
@@ -412,15 +419,15 @@ def ball_velocity_direction_alignment(
     return reward
 
 
-def ball_speed_reward(env: ManagerBasedRlEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
+def ball_speed_reward(env: ManagerBasedRLEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
     horizontal_force_threshold: float = 0.0,
     ball_sensor_name: str = "soccer_ball_contact",
     foot_cfg: SceneEntityCfg | None = None,
     ) -> torch.Tensor:
     """Reward ball speed within a short window after expected-foot contact."""
-    command = _get_command(env, command_name)
+    command: MotionCommand = env.command_manager.get_term(command_name)
     soccer_ball = env.scene["soccer_ball"]
-    vel = soccer_ball.data.root_link_lin_vel_w
+    vel = soccer_ball.data.root_link_lin_vel_w  # MJLab: root_lin_vel_w → root_link_lin_vel_w
     speed_xy = torch.norm(vel[:, :2], dim=-1)  # x-y plane speed
 
     timer_name = f"_{command_name}_speed_timer"
@@ -451,7 +458,8 @@ def ball_speed_reward(env: ManagerBasedRlEnv, command_name: str, std: float, vel
 
     reward = torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
     if torch.any(active_mask):
-        reward[active_mask] = 1.0 - torch.exp(-(speed_xy[active_mask] ** 2) / (std**2))
+        reward_active = 1.0 - torch.exp(-(speed_xy[active_mask] ** 2) / (std ** 2))
+        reward[active_mask] = reward_active
 
     # Decrement active timers.
     timer = torch.where(timer > 0, timer - 1, timer)
@@ -459,11 +467,11 @@ def ball_speed_reward(env: ManagerBasedRlEnv, command_name: str, std: float, vel
     # print("ball_speed_reward:", reward)
     return reward
 
-def ball_z_speed_penalty_reward(env: ManagerBasedRlEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
+def ball_z_speed_penalty_reward(env: ManagerBasedRLEnv, command_name: str, std: float, velocity_threshold: float = 0.1,
     ) -> torch.Tensor:
     """Penalize excessive vertical ball speed in a short post-activation window."""
     soccer_ball = env.scene["soccer_ball"]
-    vel = soccer_ball.data.root_link_lin_vel_w  # [num_envs, 3]
+    vel = soccer_ball.data.root_link_lin_vel_w  # MJLab: root_lin_vel_w → root_link_lin_vel_w
     z_speed = vel[:, 2]  # vertical speed
     speed = torch.norm(vel, dim=-1)
 
@@ -501,11 +509,11 @@ def ball_z_speed_penalty_reward(env: ManagerBasedRlEnv, command_name: str, std: 
     return reward
 
 
-def pelvis_orientation(env: ManagerBasedRlEnv, command_name: str = "motion") -> torch.Tensor:
+def pelvis_orientation(env: ManagerBasedRLEnv, command_name: str = "motion") -> torch.Tensor:
     """Penalize pelvis pitch/roll tilt to keep the robot upright."""
-    command = _get_command(env, command_name)
-    robot = env.scene[command.cfg.entity_name]
-    gravity_vec_w = robot.data.gravity_vec_w
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    robot = command.robot
+    gravity_vec_w = robot.data.gravity_vec_w  # MJLab: GRAVITY_VEC_W → gravity_vec_w
 
     # Project gravity vector to pelvis local frame.
     pelvis_proj_gravity = quat_apply_inverse(command.robot_pelvis_quat_w, gravity_vec_w)

@@ -1,20 +1,15 @@
-"""Kick contact detection for soccer tasks.
-
-Adapted from HumanoidSoccer's (arXiv-2602.05310v1) ``kick_detection.py`` for the mjlab framework.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import torch
-from mjlab.managers.scene_entity_config import SceneEntityCfg
-from mjlab.sensor.contact_sensor import ContactSensor
+from mjlab.managers.scene_entity_config import SceneEntityCfg  # MJLab: isaaclab.managers → mjlab.managers.scene_entity_config
+from mjlab.sensor.contact_sensor import ContactSensor  # MJLab: isaaclab.sensors → mjlab.sensor.contact_sensor
 
 if TYPE_CHECKING:
-    from mjlab.envs import ManagerBasedRlEnv
-    from .commands import MotionCommand
+    from mjlab.envs import ManagerBasedRlEnv as ManagerBasedRLEnv  # MJLab: ManagerBasedRLEnv → ManagerBasedRlEnv, aliased for line matching
+    from .commands_multi_motion_soccer import MotionCommand  # MJLab: IsaacLab imports from commands_multi_motion_soccer
 
 
 @dataclass
@@ -40,7 +35,7 @@ class ContactFootInfo:
 class KickContactTracker:
     """Shared kick contact detection logic reusable across reward terms."""
 
-    def __init__(self, env: ManagerBasedRlEnv, state_prefix: str):
+    def __init__(self, env: ManagerBasedRLEnv, state_prefix: str):
         self._env = env
         self._state_prefix = state_prefix
         self._device = env.device
@@ -74,8 +69,7 @@ class KickContactTracker:
             self._cache_valid = True
             return event
 
-        data = ball_sensor.data
-        forces = getattr(data, "force_history", data.force)
+        forces = getattr(ball_sensor.data, "force_history", ball_sensor.data.force) # MJLab: https://docs.robotsfan.com/isaaclab/_modules/isaaclab/sensors/contact_sensor/contact_sensor_data.html and https://mujocolab.github.io/mjlab/v1.1.1/_modules/mjlab/sensor/contact_sensor.html
         if forces is None or forces.numel() == 0:
             empty_mask = torch.zeros(self._num_envs, dtype=torch.bool, device=self._device)
             zero_force = torch.zeros(self._num_envs, dtype=torch.float32, device=self._device)
@@ -85,7 +79,7 @@ class KickContactTracker:
             return event
 
         forces = forces.to(device=self._device)
-        if forces.ndim > 3:
+        if forces.ndim > 2:
             forces = forces.amax(dim=1)
 
         force_norm = torch.linalg.norm(forces, dim=-1)
@@ -150,7 +144,7 @@ class KickContactTracker:
         body_indices, sides = self._get_foot_metadata(command, foot_cfg)
         robot = command.robot
 
-        foot_pos = robot.data.body_link_pos_w[env_ids][:, body_indices]
+        foot_pos = robot.data.body_link_pos_w[env_ids][:, body_indices]  # MJLab: body_pos_w → body_link_pos_w
         ball_pos = command.soccer_ball_pos[env_ids]
         env_origins = getattr(self._env.scene, "env_origins", None)
         if env_origins is not None:
@@ -194,14 +188,23 @@ class KickContactTracker:
             cutoff_value = max(cutoff_value, 0)
             eligible_mask = eligible_mask & (cutoff_value < step_buf)
 
+        num_resampled = int(resample_flags.sum().item())
         num_eligible = int(eligible_mask.sum().item())
-        if num_eligible > 0 and hasattr(command, "metrics"):
-            success_rate = kick_success_state[eligible_mask].float().mean()
-            expected_rate = expected_state[eligible_mask].float().mean()
-            command.metrics.setdefault("kick_success_rate", torch.zeros(self._num_envs, device=self._device))
-            command.metrics.setdefault("expected_kick_success_rate", torch.zeros(self._num_envs, device=self._device))
-            command.metrics["kick_success_rate"].fill_(success_rate.item())
-            command.metrics["expected_kick_success_rate"].fill_(expected_rate.item())
+        if num_resampled > 0 and hasattr(command, "metrics"):
+            if "kick_success_rate" not in command.metrics or command.metrics["kick_success_rate"].shape[0] != self._num_envs:
+                command.metrics["kick_success_rate"] = torch.zeros(
+                    self._num_envs, device=self._device, dtype=torch.float32
+                )
+            if "expected_kick_success_rate" not in command.metrics or command.metrics["expected_kick_success_rate"].shape[0] != self._num_envs:
+                command.metrics["expected_kick_success_rate"] = torch.zeros(
+                    self._num_envs, device=self._device, dtype=torch.float32
+                )
+
+            if num_eligible > 0:
+                success_rate = kick_success_state[eligible_mask].float().mean()
+                expected_rate = expected_state[eligible_mask].float().mean()
+                command.metrics["kick_success_rate"].fill_(success_rate.item())
+                command.metrics["expected_kick_success_rate"].fill_(expected_rate.item())
 
         contact_state[resample_flags] = False
         kick_success_state[resample_flags] = False
