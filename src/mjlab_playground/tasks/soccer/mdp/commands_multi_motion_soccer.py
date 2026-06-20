@@ -209,7 +209,7 @@ class MotionCommand(CommandTerm):
         # Adaptive sampling settings.
         # Compute bin count: decimation * dt is one simulation step duration.
         # Thus each bin corresponds to ~1 second and bin_count is the total number of bins.
-        self.bin_count = int(self.motion.time_step_total // (1 / (env.cfg.decimation * env.cfg.sim.dt))) + 1
+        self.bin_count = int(self.motion.time_step_total // (1 / (env.cfg.decimation * env.cfg.sim.mujoco.timestep))) + 1 # MJLab: sim.dt to timestep
         self.bin_failed_count = torch.zeros(
             (self.motion.num_files, self.bin_count), dtype=torch.float, device=self.device
         )
