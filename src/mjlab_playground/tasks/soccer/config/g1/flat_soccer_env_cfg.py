@@ -1,7 +1,7 @@
 import math
-import mujoco
 from dataclasses import dataclass, field  # MJLab: needed for @dataclass port of @configclass
 from pathlib import Path
+import mujoco
 
 from mjlab.entity import EntityCfg
 
@@ -15,8 +15,7 @@ from mjlab.sensor.contact_sensor import ContactSensorCfg  # MJLab: isaaclab.sens
 # MJLab: soccer.assets ASSET_DIR → MJLab uses XML-based ball asset (soccer_ball.xml)
 # MJLab: soccer.robots.g1 G1_ACTION_SCALE, G1_CYLINDER_CFG → mjlab.asset_zoo.robots
 # MJLab: soccer.tasks.tracking.config.g1.agents.rsl_rl_ppo_cfg LOW_FREQ_SCALE → not ported
-# MJLab: soccer.tasks.tracking mdp → mjlab_playground.tasks.soccer.mdp
-from ... import mdp  # MJLab: soccer.tasks.tracking → ...mdp
+from ... import mdp  # MJLab: soccer.tasks.tracking → ...mdp → mjlab_playground.tasks.soccer.mdp
 from ...tracking_env_cfg import TrackingEnvCfg, MySceneCfg, CurriculumCfg  # MJLab: tracking_env_cfg → tracking_env_config
 from .flat_env_cfg import G1FlatEnvCfg  # MJLab: .flat_env_cfg → .flat_env_config
 
