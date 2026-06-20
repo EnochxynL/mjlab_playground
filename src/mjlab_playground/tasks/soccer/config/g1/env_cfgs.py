@@ -4,12 +4,14 @@ from typing import Literal
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE, get_g1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.observations import base_ang_vel, projected_gravity
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
+from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from ...mdp import commands_multi_motion_soccer as soccer_commands
 from ...mdp import observations as soccer_obs
@@ -129,25 +131,51 @@ def _apply_common_soccer_config(
     cfg.commands["motion"] = motion_cfg
 
     # ── observations ─────────────────────────────────────────────────
+    #
+    # IsaacLab actor obs: command, projected_gravity, motion_ref_ang_vel,
+    #   base_ang_vel, joint_pos, joint_vel, actions,
+    #   target_point_pos, target_destination_pos_local  → 160 dims.
+    # MJLab tracking base uses motion_anchor_pos_b + motion_anchor_ori_b
+    #   + base_lin_vel instead (166 dims).  We rebuild the actor terms
+    #   here to match the IsaacLab structure so ONNX policies exported
+    #   from IsaacLab can be played back.
 
-    actor_terms = dict(cfg.observations["actor"].terms)
-    actor_terms["target_point_pos"] = ObservationTermCfg(
-        func=soccer_obs.constant_target_point_pos,  # MJLab: IsaacLab uses constant_target_point_pos
-        params={"command_name": "motion"},
-    )
-    actor_terms["target_destination_pos_local"] = ObservationTermCfg(
-        func=soccer_obs.target_destination_pos_local,
-        params={"command_name": "motion"},
-    )
+    base_terms = cfg.observations["actor"].terms
+    actor_terms = {
+        "command": base_terms["command"],
+        "projected_gravity": ObservationTermCfg(
+            func=projected_gravity,
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        ),
+        "motion_ref_ang_vel": ObservationTermCfg(
+            func=soccer_obs.motion_anchor_ang_vel,
+            params={"command_name": "motion"},
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        ),
+        "base_ang_vel": base_terms["base_ang_vel"],
+        "joint_pos": base_terms["joint_pos"],
+        "joint_vel": base_terms["joint_vel"],
+        "actions": base_terms["actions"],
+        "target_point_pos": ObservationTermCfg(
+            func=soccer_obs.constant_target_point_pos,
+            params={"command_name": "motion"},
+        ),
+        "target_destination_pos_local": ObservationTermCfg(
+            func=soccer_obs.target_destination_pos_local,
+            params={"command_name": "motion"},
+        ),
+    }
     cfg.observations["actor"] = ObservationGroupCfg(
         terms=actor_terms,
         concatenate_terms=True,
         enable_corruption=not play,
     )
 
+    # Critic keeps the MJLab base structure (no change needed — critic
+    # is only used for training, not inference).
     critic_terms = dict(cfg.observations["critic"].terms)
     critic_terms["target_point_pos"] = ObservationTermCfg(
-        func=soccer_obs.constant_target_point_pos,  # MJLab: IsaacLab uses constant_target_point_pos
+        func=soccer_obs.constant_target_point_pos,
         params={"command_name": "motion"},
     )
     critic_terms["target_destination_pos_local"] = ObservationTermCfg(
