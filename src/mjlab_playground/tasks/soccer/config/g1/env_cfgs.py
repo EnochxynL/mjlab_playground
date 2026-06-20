@@ -14,7 +14,7 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 from ...mdp import commands_multi_motion_soccer as soccer_commands
 from ...mdp import observations as soccer_obs
 from ...mdp import rewards as soccer_rewards
-from .flat_soccer_env_config import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
+from .flat_soccer_env_cfg import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
 
 # ── common setup shared by both stages ─────────────────────────────────────
 
