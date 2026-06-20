@@ -12,12 +12,17 @@ Usage:
   # FK-only (fast, default):
   uv run python scripts/soccer/g1_retarget_t1.py \\
     --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-t1/soccer-t1-001_right.npz
+    --output data/soccer/t1/soccer-standard-001_right.npz
 
   # FK+IK with live viewer:
   uv run python scripts/soccer/g1_retarget_t1.py \\
     --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-t1/soccer-t1-001_right.npz --ik --view
+    --output data/soccer/t1/soccer-standard-001_right.npz --ik --view
+
+  # Best result:
+  uv run python scripts/soccer/g1_retarget_t1.py \\
+    --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
+    --output data/soccer/t1/soccer-standard-001_right.npz --ik --view --ik-reg-weight 0.5
 """
 
 from __future__ import annotations
@@ -161,29 +166,36 @@ def _solve_ik(
   lower: np.ndarray,
   upper: np.ndarray,
   max_iter: int,
+  reg_weight: float = 0.1,
 ) -> tuple[np.ndarray, object]:
   """Solve IK for one frame: match T1 body positions to *targets*.
 
   *joint_order* lists MuJoCo joint indices in the order *x* is laid out.
+  *reg_weight* penalises deviation from the FK-only initial guess *x0*,
+  preventing extreme joint angles when targets are unreachable.
   """
+
+  n_joints = len(joint_order)
+  n_ee = len(body_ids) * 3
+  n_total = n_ee + n_joints
 
   def residual(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x).ravel()
     for out_idx, t1_mu_idx in enumerate(joint_order):
       data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(x[out_idx])
     mujoco.mj_forward(model, data)
-    res = np.zeros((len(body_ids) * 3, 1), dtype=np.float64)
+    res = np.zeros((n_total, 1), dtype=np.float64)
     for i, bid in enumerate(body_ids):
       err = data.xpos[bid] - targets[i]
       w = weights[i]
       res[i * 3, 0] = err[0] * w
       res[i * 3 + 1, 0] = err[1] * w
       res[i * 3 + 2, 0] = err[2] * w
+    res[n_ee:, 0] = (x - x0) * reg_weight
     return res
 
   def jacobian(x: np.ndarray, _r: np.ndarray) -> np.ndarray:
-    n_joints = len(joint_order)
-    jac = np.zeros((len(body_ids) * 3, n_joints), dtype=np.float64)
+    jac = np.zeros((n_total, n_joints), dtype=np.float64)
     for i, bid in enumerate(body_ids):
       jacp = np.zeros((3, model.nv), dtype=np.float64)
       mujoco.mj_jacBody(model, data, jacp, None, bid)
@@ -193,6 +205,7 @@ def _solve_ik(
         jac[i * 3, out_idx] = jacp[0, dof_adr] * w
         jac[i * 3 + 1, out_idx] = jacp[1, dof_adr] * w
         jac[i * 3 + 2, out_idx] = jacp[2, dof_adr] * w
+    jac[n_ee:, :] = np.eye(n_joints) * reg_weight
     return jac
 
   return mujoco.minimize.least_squares(
@@ -253,6 +266,13 @@ def main() -> None:
     type=float,
     default=0.95,
     help="Uniform scale applied to G1 body positions relative to pelvis (default: 0.95).",
+  )
+  parser.add_argument(
+    "--ik-reg-weight",
+    type=float,
+    default=0.1,
+    help="IK regularisation weight: penalises deviation from FK-only initial guess "
+    "(default: 0.1). Increase if joints swing wildly.",
   )
   args = parser.parse_args()
 
@@ -442,6 +462,7 @@ def main() -> None:
         ik_lower,
         ik_upper,
         args.ik_max_iter,
+        reg_weight=args.ik_reg_weight,
       )
 
       if _trace[-1].objective > 10.0:
