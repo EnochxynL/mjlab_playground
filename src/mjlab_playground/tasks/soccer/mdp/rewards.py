@@ -182,9 +182,8 @@ def feet_slip_penalty(env: ManagerBasedRLEnv, foot_cfg: SceneEntityCfg, slip_for
     if hasattr(forces_data, "force_history"):  # MJLab: net_forces_w_history → force_history
         forces_hist = forces_data.force_history  # MJLab: net_forces_w_history → force_history
         if forces_hist.numel() > 0:
-            forces = forces_hist.to(device)
-            if forces.ndim >= 4:
-                forces = forces.max(dim=1).values
+            # MJLab: force_history [B, N, H, 3] — take latest history step to preserve body dim N for subsequent body indexing
+            forces = forces_hist.to(device)[:, :, -1, :]  # [B, N, H, 3] → [B, N, 3]
     if forces is None:
         if hasattr(forces_data, "force"):  # MJLab: net_forces_w → force
             forces = forces_data.force  # MJLab: net_forces_w → force
@@ -522,9 +521,13 @@ def pelvis_orientation(env: ManagerBasedRLEnv, command_name: str = "motion") -> 
 
 
 def undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalize undesired contacts as the number of violations that are above a threshold."""  # MJLab: ported from isaaclab.envs.mdp.rewards — uses force_history instead of net_forces_w_history
+    """Penalize undesired contacts as the number of violations that are above a threshold."""
+    # MJLab: ported from isaaclab.envs.mdp.rewards — uses force_history instead of net_forces_w_history.
+    # NOTE: This function requires a sensor named "contact_forces" with reduce="netforce" semantics.
+    # MJLab does not define such a sensor by default. The active config uses self_collision_cost
+    # (from mjlab.tasks.tracking.mdp) with the self_collision sensor instead.
     # extract the used quantities (to enable type-hinting)
-    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]  # MJLab: env.scene.sensors[name] instead of env.scene.sensors[name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]  # MJLab: IsaacLab uses env.scene.sensors[name] — same access pattern in MJLab
     # check if contact force is above threshold
     net_contact_forces = contact_sensor.data.force_history  # MJLab: net_forces_w_history → force_history [B, N, H, 3]
     if net_contact_forces is None:

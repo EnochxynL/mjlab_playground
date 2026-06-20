@@ -265,18 +265,17 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
       )
     )
+    # MJLab: isaaclab.envs.mdp.rewards.undesired_contacts uses contact_forces sensor which
+    # does not exist in MJLab. MJLab tracking uses self_collision_cost with the self_collision
+    # sensor instead. Body-name filtering (excluding feet/wrists) is not available in
+    # self_collision_cost — all self-collisions are penalized uniformly.
     undesired_contacts: RewTerm = field(  # MJLab: mutable default → field
       default_factory=lambda: RewTerm(
-        func=mdp.undesired_contacts,  # MJLab: ported from isaaclab.envs.mdp.rewards to soccer mdp/rewards.py
+        func=mdp.self_collision_cost,  # MJLab: isaaclab.envs.mdp.rewards.undesired_contacts → mjlab.tasks.tracking.mdp.self_collision_cost
         weight=-0.1,
         params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_forces",
-                body_names=[
-                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                ],
-            ),
-            "threshold": 1.0,
+            "sensor_name": "self_collision",
+            "force_threshold": 1.0,
         },
       )
     )

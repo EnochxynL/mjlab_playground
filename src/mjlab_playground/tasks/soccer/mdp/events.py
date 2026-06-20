@@ -154,6 +154,10 @@ def randomize_rigid_body_material(
     # root_physx_view.get_material_properties/set_material_properties.
     # MuJoCo uses geom_friction (tangential/torsional/rolling) and solref/solimp.
     # We delegate to dr.geom_friction for the friction component.
+    # MJLab note: num_buckets is accepted but continuous uniform distribution is used
+    # instead of discrete buckets. MuJoCo's geom_friction applies per-geom randomization
+    # from a continuous range, which provides strictly more diversity than bucket sampling.
+    # make_consistent is also not applicable — each geom gets independent randomization.
     from mjlab.envs.mdp.dr.geom import geom_friction  # MJLab: lazy import to avoid circular deps
 
     if env_ids is None:
