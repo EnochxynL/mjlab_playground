@@ -13,7 +13,7 @@ from dataclasses import dataclass  # MJLab: needed for @dataclass port of @confi
 from mjlab.asset_zoo.robots import G1_ACTION_SCALE, get_g1_robot_cfg
 
 from ...mdp import commands_multi_motion_soccer as soccer_commands  # MJLab: IsaacLab imports commands_multi_motion_soccer
-from ...tracking_env_config import TrackingEnvCfg  # MJLab: IsaacLab tracking_env_cfg TrackingEnvCfg → tracking_env_config
+from ...tracking_env_cfg import TrackingEnvCfg  # MJLab: IsaacLab tracking_env_cfg TrackingEnvCfg → tracking_env_config
 
 
 @dataclass(kw_only=True)  # MJLab: @configclass → @dataclass(kw_only=True)
