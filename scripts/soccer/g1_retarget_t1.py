@@ -1,15 +1,21 @@
 """Retarget a G1 motion .npz to the Booster T1 skeleton via MuJoCo FK.
 
 Usage:
-  uv run python scripts/soccer/retarget_motion.py \\
+  uv run python scripts/soccer/g1_retarget_t1.py \\
     --input data/soccer-standard/soccer-standard-001_right.npz \\
     --output data/soccer-t1/soccer-t1-001_right.npz
+
+  # With live viewer:
+  uv run python scripts/soccer/g1_retarget_t1.py \\
+    --input data/soccer-standard/soccer-standard-001_right.npz \\
+    --output data/soccer-t1/soccer-t1-001_right.npz --view
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import mujoco
@@ -125,6 +131,17 @@ def main() -> None:
     default=0.74,
     help="Default standing height for T1 root z (default: 0.74)",
   )
+  parser.add_argument(
+    "--view",
+    action="store_true",
+    help="Open a MuJoCo viewer to watch each frame live.",
+  )
+  parser.add_argument(
+    "--speed",
+    type=float,
+    default=1.0,
+    help="Playback speed multiplier (1.0 = real time, 0 = max speed).",
+  )
   args = parser.parse_args()
 
   # ── Load G1 motion ─────────────────────────────────────────────────
@@ -144,7 +161,7 @@ def main() -> None:
 
   frames = int(src["joint_pos"].shape[0])
   g1_joint_pos = src["joint_pos"].astype(np.float64)
-  g1_pelvis_pos = src["body_pos_w"][:, 0, :].astype(np.float64)  # pelvis is body 0
+  g1_pelvis_pos = src["body_pos_w"][:, 0, :].astype(np.float64)
   g1_pelvis_quat = src["body_quat_w"][:, 0, :].astype(np.float64)
   fps = float(np.asarray(src["fps"]).reshape(-1)[0])
   print(f"Loaded G1 motion: {frames} frames, {fps} fps")
@@ -158,19 +175,24 @@ def main() -> None:
   n_t1_joints = sum(
     1 for i in range(model.njnt) if model.jnt_type[i] != mujoco.mjtJoint.mjJNT_FREE
   )
-  # Exclude body 0 ('world').
-  n_t1_bodies = model.nbody - 1
+  n_t1_bodies = model.nbody - 1  # exclude body 0 ('world')
   print(f"T1 model: {n_t1_joints} joints, {n_t1_bodies} bodies")
 
-  # Build a sorted list of non-free joint indices for output ordering.
   _t1_joint_output_order = sorted(_t1_joint_name_to_idx.values())
   _t1_joint_out_idx = {
     mu_idx: out_idx for out_idx, mu_idx in enumerate(_t1_joint_output_order)
   }
 
-  # Report mapping coverage.
   mapped = sum(1 for v in _G1_TO_T1.values() if v is not None)
   print(f"Joint mapping: {mapped}/{len(_G1_JOINT_NAMES)} G1 joints map to T1")
+
+  # ── Viewer (optional) ──────────────────────────────────────────────
+  viewer = None
+  frame_dt = None
+  if args.view:
+    viewer = mujoco.viewer.launch_passive(model, data)
+    frame_dt = 1.0 / fps if args.speed > 0 else 0.0
+    print(f"Viewer opened (speed={args.speed}x, {frame_dt:.3f}s/frame)")
 
   # ── Retarget frame by frame ────────────────────────────────────────
   t1_joint_pos = np.zeros((frames, n_t1_joints), dtype=np.float32)
@@ -202,7 +224,7 @@ def main() -> None:
       t1_joint_pos[frame, out_idx] = float(data.qpos[model.jnt_qposadr[t1_mu_idx]])
       t1_joint_vel[frame, out_idx] = float(data.qvel[model.jnt_dofadr[t1_mu_idx]])
 
-    # Body 0 is 'world' — skip it (body_pos_w matches G1 convention).
+    # Body 0 is 'world' — skip it.
     for body_idx in range(1, model.nbody):
       out_body = body_idx - 1
       t1_body_pos_w[frame, out_body] = data.xpos[body_idx]
@@ -211,6 +233,15 @@ def main() -> None:
       mujoco.mj_objectVelocity(model, data, mujoco.mjtObj.mjOBJ_BODY, body_idx, vel, 0)
       t1_body_lin_vel_w[frame, out_body] = vel[3:6]
       t1_body_ang_vel_w[frame, out_body] = vel[:3]
+
+    if viewer is not None:
+      viewer.sync()
+      if frame_dt is not None and frame_dt > 0:
+        time.sleep(frame_dt / args.speed)
+
+  # ── Cleanup ─────────────────────────────────────────────────────────
+  if viewer is not None:
+    viewer.close()
 
   # ── Export ──────────────────────────────────────────────────────────
   out_dir = Path(args.output).parent
