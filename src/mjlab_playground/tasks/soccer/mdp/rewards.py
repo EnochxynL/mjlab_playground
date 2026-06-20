@@ -514,7 +514,7 @@ def pelvis_orientation(env: ManagerBasedRLEnv, command_name: str = "motion") -> 
     command: MotionCommand = env.command_manager.get_term(command_name)
     robot = command.robot
     gravity_vec_w = robot.data.gravity_vec_w  # MJLab: GRAVITY_VEC_W → gravity_vec_w
-
+    
     # Project gravity vector to pelvis local frame.
     pelvis_proj_gravity = quat_apply_inverse(command.robot_pelvis_quat_w, gravity_vec_w)
     # print("pelvis_proj_gravity:", gravity_vec_w, pelvis_proj_gravity)

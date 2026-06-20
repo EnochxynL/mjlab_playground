@@ -81,6 +81,16 @@ class G1FlatEnvCfg(TrackingEnvCfg):
 
 # ── common setup shared by both stages ─────────────────────────────────────
 
+# IsaacLab 的 `@configclass` 支持子类重定义父类字段 + mutable default，所以可以靠继承链自然叠加配置：
+# ```
+# G1FlatEnvCfg(TrackingEnvCfg)
+# └─ G1FlatMotionEnvCfg(G1FlatEnvCfg)
+#     └─ G1FlatProximityEnvCfg(G1FlatMotionEnvCfg)
+#             └─ G1FlatKickEnvCfg(G1FlatProximityEnvCfg)
+# ```
+# 每一层在 `__post_init__` 里增量修改，继承链本身就是配置组合器。
+# MJLab 的 `@dataclass` 不允许字段重定义，这个继承链断了。所以只能把同样的逻辑"展平"成一个工厂函数：调 `make_tracking_env_cfg()` 拿到裸配置，然后 _apply_common_soccer_config() 一次性把所有层级的修改叠上去，最后返回。
+# 本质上 `_apply_common_soccer_config` 就是在模拟 `@configclass` 的继承叠加能力。
 
 def _apply_common_soccer_config(
     cfg: ManagerBasedRlEnvCfg,
