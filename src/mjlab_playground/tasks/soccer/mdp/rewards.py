@@ -519,3 +519,17 @@ def pelvis_orientation(env: ManagerBasedRLEnv, command_name: str = "motion") -> 
     pelvis_proj_gravity = quat_apply_inverse(command.robot_pelvis_quat_w, gravity_vec_w)
     # print("pelvis_proj_gravity:", gravity_vec_w, pelvis_proj_gravity)
     return torch.sum(torch.square(pelvis_proj_gravity[:, :2]), dim=1)
+
+
+def undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize undesired contacts as the number of violations that are above a threshold."""  # MJLab: ported from isaaclab.envs.mdp.rewards — uses force_history instead of net_forces_w_history
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]  # MJLab: env.scene.sensors[name] instead of env.scene.sensors[name]
+    # check if contact force is above threshold
+    net_contact_forces = contact_sensor.data.force_history  # MJLab: net_forces_w_history → force_history [B, N, H, 3]
+    if net_contact_forces is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    # MJLab: net_forces_w_history[:, :, body_ids] → force_history[:, body_ids, :, :] (different tensor layout)
+    is_contact = torch.max(torch.norm(net_contact_forces[:, sensor_cfg.body_ids, :, :], dim=-1), dim=-1)[0] > threshold
+    # sum over contacts for each environment
+    return torch.sum(is_contact, dim=1)
