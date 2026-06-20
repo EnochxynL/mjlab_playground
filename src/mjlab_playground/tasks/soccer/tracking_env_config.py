@@ -69,21 +69,21 @@ class CommandsCfg:
     """Command specifications for the MDP."""
 
     motion: mdp.MotionCommandCfg = field(  # MJLab: mutable default → field(default_factory=...); mdp.MotionCommandCfg from soccer MDP
-        default_factory=lambda: mdp.MotionCommandCfg(
-            entity_name="robot",  # MJLab: asset_name → entity_name
-            resampling_time_range=(1.0e9, 1.0e9),
-            debug_vis=True,
-            pose_range={
-                "x": (-0.05, 0.05),
-                "y": (-0.05, 0.05),
-                "z": (-0.01, 0.01),
-                "roll": (-0.1, 0.1),
-                "pitch": (-0.1, 0.1),
-                "yaw": (-0.2, 0.2),
-            },
-            velocity_range=VELOCITY_RANGE,
-            joint_position_range=(-0.1, 0.1),
-        )
+      default_factory=lambda: mdp.MotionCommandCfg(
+        entity_name="robot",  # MJLab: asset_name → entity_name
+        resampling_time_range=(1.0e9, 1.0e9),
+        debug_vis=True,
+        pose_range={
+            "x": (-0.05, 0.05),
+            "y": (-0.05, 0.05),
+            "z": (-0.01, 0.01),
+            "roll": (-0.1, 0.1),
+            "pitch": (-0.1, 0.1),
+            "yaw": (-0.2, 0.2),
+        },
+        velocity_range=VELOCITY_RANGE,
+        joint_position_range=(-0.1, 0.1),
+      )
     )
 
 
@@ -120,7 +120,7 @@ class ObservationsCfg:
         # joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         # joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5))
         # actions = ObsTerm(func=mdp.last_action)
-
+        
         # obs v1: add_prog, 154 dims
         command: ObsTerm = field(default_factory=lambda: ObsTerm(func=mdp.generated_commands, params={"command_name": "motion"}))  # MJLab: mutable default → field
         projected_gravity: ObsTerm = field(default_factory=lambda: ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05)))  # MJLab: mutable default → field
@@ -160,50 +160,50 @@ class EventCfg:
     # startup
     # MJLab: physics_material randomize_rigid_body_material not available — MJLab uses dr.geom_friction for material randomization
     physics_material: EventTerm = field(  # MJLab: mutable default → field; func not available in MJLab
-        default_factory=lambda: EventTerm(
-            func=mdp.randomize_rigid_body_material,  # MJLab: not available — use dr.geom_friction in flat_env_config.py
-            mode="startup",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-                "static_friction_range": (0.3, 1.6),
-                "dynamic_friction_range": (0.3, 1.2),
-                "restitution_range": (0.0, 0.5),
-                "num_buckets": 64,
-            },
-        )
+      default_factory=lambda: EventTerm(
+        func=mdp.randomize_rigid_body_material,  # MJLab: not available — use dr.geom_friction in flat_env_config.py
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": (0.3, 1.6),
+            "dynamic_friction_range": (0.3, 1.2),
+            "restitution_range": (0.0, 0.5),
+            "num_buckets": 64,
+        },
+      )
     )
 
     add_joint_default_pos: EventTerm = field(
-        default_factory=lambda: EventTerm(
-            func=mdp.randomize_joint_default_pos,
-            mode="startup",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
-                "pos_distribution_params": (-0.01, 0.01),
-                "operation": "add",
-            },
-        )
+      default_factory=lambda: EventTerm(
+        func=mdp.randomize_joint_default_pos,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*"]),
+            "pos_distribution_params": (-0.01, 0.01),
+            "operation": "add",
+        },
+      )
     )
 
     base_com: EventTerm = field(
-        default_factory=lambda: EventTerm(
-            func=mdp.randomize_rigid_body_com,  # MJLab: ported from IsaacLab — uses model body_ipos instead of PhysX get_coms/set_coms
-            mode="startup",
-            params={
-                "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-                "com_range": {"x": (-0.025, 0.025), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
-            },
-        )
+      default_factory=lambda: EventTerm(
+        func=mdp.randomize_rigid_body_com,  # MJLab: ported from IsaacLab — uses model body_ipos instead of PhysX get_coms/set_coms
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
+            "com_range": {"x": (-0.025, 0.025), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+        },
+      )
     )
 
     # interval
     push_robot: EventTerm = field(
-        default_factory=lambda: EventTerm(
-            func=mdp.push_by_setting_velocity,
-            mode="interval",
-            interval_range_s=(1.0, 3.0),
-            params={"velocity_range": VELOCITY_RANGE},
-        )
+      default_factory=lambda: EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(1.0, 3.0),
+        params={"velocity_range": VELOCITY_RANGE},
+      )
     )
 
 
@@ -212,73 +212,73 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     motion_global_anchor_pos: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_global_anchor_position_error_exp,
-            # weight=0.5,
-            weight=1.0,
-            params={"command_name": "motion", "std": 0.3},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_global_anchor_position_error_exp,
+        # weight=0.5,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.3},
+      )
     )
     motion_global_anchor_ori: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_global_anchor_orientation_error_exp,
-            # weight=0.5,
-            weight=1.0,
-            params={"command_name": "motion", "std": 0.4},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_global_anchor_orientation_error_exp,
+        # weight=0.5,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.4},
+      )
     )
     motion_body_pos: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_relative_body_position_error_exp,
-            weight=1.0,
-            params={"command_name": "motion", "std": 0.3},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_relative_body_position_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.3},
+      )
     )
     motion_body_ori: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_relative_body_orientation_error_exp,
-            weight=1.0,
-            params={"command_name": "motion", "std": 0.4},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_relative_body_orientation_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 0.4},
+      )
     )
     motion_body_lin_vel: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_global_body_linear_velocity_error_exp,
-            weight=1.0,
-            params={"command_name": "motion", "std": 1.0},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_global_body_linear_velocity_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 1.0},
+      )
     )
     motion_body_ang_vel: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.motion_global_body_angular_velocity_error_exp,
-            weight=1.0,
-            params={"command_name": "motion", "std": 3.14},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.motion_global_body_angular_velocity_error_exp,
+        weight=1.0,
+        params={"command_name": "motion", "std": 3.14},
+      )
     )
     action_rate_l2: RewTerm = field(  # MJLab: mutable default → field
         default_factory=lambda: RewTerm(func=mdp.action_rate_l2_clip, weight=-1e-1)
     )
     joint_limit: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.joint_pos_limits,
-            weight=-10.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.joint_pos_limits,
+        weight=-10.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+      )
     )
     undesired_contacts: RewTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: RewTerm(
-            func=mdp.undesired_contacts,  # MJLab: ported from isaaclab.envs.mdp.rewards to soccer mdp/rewards.py
-            weight=-0.1,
-            params={
-                "sensor_cfg": SceneEntityCfg(
-                    "contact_forces",
-                    body_names=[
-                        r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
-                    ],
-                ),
-                "threshold": 1.0,
-            },
-        )
+      default_factory=lambda: RewTerm(
+        func=mdp.undesired_contacts,  # MJLab: ported from isaaclab.envs.mdp.rewards to soccer mdp/rewards.py
+        weight=-0.1,
+        params={
+            "sensor_cfg": SceneEntityCfg(
+                "contact_forces",
+                body_names=[
+                    r"^(?!left_ankle_roll_link$)(?!right_ankle_roll_link$)(?!left_wrist_yaw_link$)(?!right_wrist_yaw_link$).+$"
+                ],
+            ),
+            "threshold": 1.0,
+        },
+      )
     )
 
 
@@ -295,31 +295,31 @@ class TerminationsCfg:
     #     params={"command_name": "motion", "threshold": 0.50},
     # )
     anchor_pos_z: DoneTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: DoneTerm(
-            func=mdp.bad_anchor_pos_z_only,
-            params={"command_name": "motion", "threshold": 0.25},
-        )
+      default_factory=lambda: DoneTerm(
+        func=mdp.bad_anchor_pos_z_only,
+        params={"command_name": "motion", "threshold": 0.25},
+      )
     )
     anchor_ori: DoneTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: DoneTerm(
-            func=mdp.bad_anchor_ori,
-            params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
-        )
+      default_factory=lambda: DoneTerm(
+        func=mdp.bad_anchor_ori,
+        params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "motion", "threshold": 0.8},
+      )
     )
     ee_body_pos: DoneTerm = field(  # MJLab: mutable default → field
-        default_factory=lambda: DoneTerm(
-            func=mdp.bad_motion_body_pos_z_only,
-            params={
-                "command_name": "motion",
-                "threshold": 0.25,
-                "body_names": [
-                    "left_ankle_roll_link",
-                    "right_ankle_roll_link",
-                    "left_wrist_yaw_link",
-                    "right_wrist_yaw_link",
-                ],
-            },
-        )
+      default_factory=lambda: DoneTerm(
+        func=mdp.bad_motion_body_pos_z_only,
+        params={
+            "command_name": "motion",
+            "threshold": 0.25,
+            "body_names": [
+                "left_ankle_roll_link",
+                "right_ankle_roll_link",
+                "left_wrist_yaw_link",
+                "right_wrist_yaw_link",
+            ],
+        },
+      )
     )
 
 

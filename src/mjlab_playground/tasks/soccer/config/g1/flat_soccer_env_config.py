@@ -245,7 +245,7 @@ class G1FlatProximityEnvCfg(G1FlatMotionEnvCfg):
         self.motion_body_ori = RewTerm(
         func=mdp.motion_relative_body_orientation_error_exp,
         weight=1.0,
-        params={"command_name": "motion", "std": 0.4,
+        params={"command_name": "motion", "std": 0.4, 
                 "body_names" : [
                     "pelvis",
                     "left_hip_roll_link",
@@ -306,7 +306,7 @@ class G1FlatKickEnvCfg(G1FlatProximityEnvCfg):
             },
         )
 
-
+        
         self.rewards.ball_velocity_direction_alignment = RewTerm(
             func=mdp.ball_velocity_direction_alignment,
             weight=30.0,
@@ -361,11 +361,11 @@ class G1FlatKickMovingEnvCfg(G1FlatKickEnvCfg):
 class G1FlatSoccerBlindEnvCfg(G1FlatKickEnvCfg):
     def __post_init__(self):
         super().__post_init__()
-
+        
         # Custom blind-zone range: the ball is invisible when (x, y) distance is outside [min, max].
         self.commands.motion.blind_distance_min_range = (0.2, 0.8)  # Minimum distance sampling range.
         self.commands.motion.blind_distance_max_range = (1.8, 2.5)  # Maximum distance sampling range.
-
+        
         self.observations.policy.target_point_pos = ObsTerm(
             func=mdp.blind_zone_target_point_pos,
             params={"command_name": "motion"},
