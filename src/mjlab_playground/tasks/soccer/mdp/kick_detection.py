@@ -1,18 +1,20 @@
 """Kick contact detection for soccer tasks.
 
-Adapted from HumanoidSoccer (arXiv-2602.05310v1).
+Adapted from HumanoidSoccer's (arXiv-2602.05310v1) ``kick_detection.py`` for the mjlab framework.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import torch
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor.contact_sensor import ContactSensor
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from .commands import MotionCommand
 
 
 @dataclass
@@ -22,7 +24,7 @@ class KickContactEvent:
     new_contact: torch.Tensor
     kick_detected: torch.Tensor
     peak_force: torch.Tensor
-    force_norm: torch.Tensor | None = None
+    force_norm: Optional[torch.Tensor] = None
 
 
 @dataclass
@@ -36,10 +38,7 @@ class ContactFootInfo:
 
 
 class KickContactTracker:
-    """Shared kick contact detection logic reusable across reward terms.
-
-    Adapted from HumanoidSoccer's ``kick_detection.py`` for the mjlab framework.
-    """
+    """Shared kick contact detection logic reusable across reward terms."""
 
     def __init__(self, env: ManagerBasedRlEnv, state_prefix: str):
         self._env = env
@@ -47,10 +46,10 @@ class KickContactTracker:
         self._device = env.device
         self._num_envs = env.num_envs
         self._cache_valid = False
-        self._cached_event: KickContactEvent | None = None
-        self._foot_cache: tuple[torch.Tensor, torch.Tensor] | None = None
+        self._cached_event: Optional[KickContactEvent] = None
+        self._foot_cache: Optional[tuple[torch.Tensor, torch.Tensor]] = None
 
-    def begin_step(self, command) -> None:
+    def begin_step(self, command: MotionCommand):
         """Reset per-step cache and handle envs that just resampled motions."""
         self._cache_valid = False
         self._cached_event = None
@@ -58,7 +57,7 @@ class KickContactTracker:
 
     def detect(
         self,
-        command,
+        command: MotionCommand,
         ball_sensor_name: str,
         horizontal_force_threshold: float,
     ) -> KickContactEvent:
@@ -124,9 +123,20 @@ class KickContactTracker:
         """Get frozen proximity reward values."""
         return self._get_or_init_float_tensor("frozen_proximity_reward", default=0.0)
 
+    def _get_or_init_float_tensor(self, suffix: str, default: float) -> torch.Tensor:
+        name = self._tensor_name(suffix)
+        tensor = getattr(self._env, name, None)
+        if tensor is None or tensor.shape[0] != self._num_envs:
+            tensor = torch.full((self._num_envs,), default, dtype=torch.float32, device=self._device)
+            setattr(self._env, name, tensor)
+            return tensor
+        tensor = tensor.to(device=self._device, dtype=torch.float32)
+        setattr(self._env, name, tensor)
+        return tensor
+
     def resolve_contact_foot(
         self,
-        command,
+        command: MotionCommand,
         foot_cfg: SceneEntityCfg,
         mask: torch.Tensor,
     ) -> ContactFootInfo:
@@ -156,9 +166,7 @@ class KickContactTracker:
 
         return ContactFootInfo(env_ids, selected_body_indices, hit_sides, expected)
 
-    # ── internal helpers ────────────────────────────────────────────────
-
-    def _handle_resample(self, command) -> None:
+    def _handle_resample(self, command: MotionCommand):
         flag_name = self._tensor_name("motion_resampled")
         resample_flags = getattr(self._env, flag_name, None)
         if resample_flags is None or resample_flags.shape[0] != self._num_envs:
@@ -172,12 +180,17 @@ class KickContactTracker:
         kick_success_state = self._get_or_init_bool_tensor("kick_success", default=False)
         expected_state = self._get_or_init_bool_tensor("expected_kick_success", default=False)
 
-        # Skip resamples triggered by imminent episode termination.
+        # Skip resamples triggered by imminent episode termination to avoid skewed stats.
         eligible_mask = resample_flags.clone()
         step_buf = getattr(self._env, "episode_length_buf", None)
         if step_buf is not None:
             step_buf = step_buf.to(device=self._device, dtype=torch.long)
             cutoff_value = 1
+            # max_episode_length = getattr(self._env, "max_episode_length", None)
+            # if isinstance(max_episode_length, torch.Tensor):
+            #     cutoff_value = int(max_episode_length.item()) - 1
+            # elif isinstance(max_episode_length, (int, float)):
+            #     cutoff_value = int(max_episode_length) - 1
             cutoff_value = max(cutoff_value, 0)
             eligible_mask = eligible_mask & (cutoff_value < step_buf)
 
@@ -193,20 +206,20 @@ class KickContactTracker:
         contact_state[resample_flags] = False
         kick_success_state[resample_flags] = False
         expected_state[resample_flags] = False
-
+        
+        # Reset frozen proximity reward.
         frozen_proximity = self._get_or_init_float_tensor("frozen_proximity_reward", default=0.0)
         frozen_proximity[resample_flags] = 0.0
-
+        
+        # Reset reward timers to avoid stale window logic after resampling.
         self._reset_reward_timers(resample_flags)
+        
         resample_flags[resample_flags] = False
         setattr(self._env, flag_name, resample_flags)
 
-    def _reset_reward_timers(self, resample_flags: torch.Tensor) -> None:
-        timer_suffixes = [
-            "dir_align_timer", "dir_align_prev",
-            "speed_timer", "speed_prev",
-            "z_speed_timer", "z_speed_prev",
-        ]
+    def _reset_reward_timers(self, resample_flags: torch.Tensor):
+        """Reset reward timer states for environments that have been resampled."""
+        timer_suffixes = ["dir_align_timer", "dir_align_prev", "speed_timer", "speed_prev", "z_speed_timer", "z_speed_prev"]
         for suffix in timer_suffixes:
             timer_name = f"_{self._state_prefix}_{suffix}"
             timer = getattr(self._env, timer_name, None)
@@ -217,7 +230,7 @@ class KickContactTracker:
     def _tensor_name(self, suffix: str) -> str:
         return f"{self._state_prefix}_{suffix}"
 
-    def _get_contact_sensor(self, name: str):
+    def _get_contact_sensor(self, name: str) -> Optional[ContactSensor]:
         sensors = getattr(self._env.scene, "sensors", None)
         if sensors is None:
             return None
@@ -235,22 +248,12 @@ class KickContactTracker:
             tensor = torch.full((self._num_envs,), default, dtype=torch.bool, device=self._device)
             setattr(self._env, name, tensor)
             return tensor
+
         tensor = tensor.to(device=self._device, dtype=torch.bool)
         setattr(self._env, name, tensor)
         return tensor
 
-    def _get_or_init_float_tensor(self, suffix: str, default: float) -> torch.Tensor:
-        name = self._tensor_name(suffix)
-        tensor = getattr(self._env, name, None)
-        if tensor is None or tensor.shape[0] != self._num_envs:
-            tensor = torch.full((self._num_envs,), default, dtype=torch.float32, device=self._device)
-            setattr(self._env, name, tensor)
-            return tensor
-        tensor = tensor.to(device=self._device, dtype=torch.float32)
-        setattr(self._env, name, tensor)
-        return tensor
-
-    def _update_detection_state(self, new_contact: torch.Tensor) -> None:
+    def _update_detection_state(self, new_contact: torch.Tensor):
         if not torch.any(new_contact):
             return
         kick_success_state = self._get_or_init_bool_tensor("kick_success", default=False)
@@ -258,7 +261,7 @@ class KickContactTracker:
 
     def _get_foot_metadata(
         self,
-        command,
+        command: MotionCommand,
         foot_cfg: SceneEntityCfg,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if self._foot_cache is not None:
