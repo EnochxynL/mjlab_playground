@@ -1,7 +1,7 @@
 from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
 
-from .flat_env_config import g1_soccer_tracking_env_cfg, g1_soccer_destination_env_cfg
+from .env_cfgs import g1_soccer_tracking_env_cfg, g1_soccer_destination_env_cfg
 from .rl_cfg import g1_soccer_tracking_ppo_runner_cfg, g1_soccer_destination_ppo_runner_cfg
 
 # Stage 1: motion-skill acquisition (tracking + soccer obs, no kick rewards)

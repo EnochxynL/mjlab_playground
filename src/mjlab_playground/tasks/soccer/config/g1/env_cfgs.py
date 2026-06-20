@@ -1,8 +1,7 @@
-import mujoco
-from pathlib import Path
+import math
 from typing import Literal
 
-from mjlab.entity.entity import EntityCfg
+from mjlab.asset_zoo.robots import G1_ACTION_SCALE, get_g1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
@@ -12,8 +11,10 @@ from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
+from ...mdp import commands_multi_motion_soccer as soccer_commands
 from ...mdp import observations as soccer_obs
 from ...mdp import rewards as soccer_rewards
+from .flat_soccer_env_config import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
 
 # ── common setup shared by both stages ─────────────────────────────────────
 

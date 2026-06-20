@@ -1,7 +1,9 @@
 import math
 import mujoco
-from pathlib import Path
 from dataclasses import dataclass, field  # MJLab: needed for @dataclass port of @configclass
+from pathlib import Path
+
+from mjlab.entity import EntityCfg
 
 from mjlab.managers.observation_manager import ObservationTermCfg as ObsTerm  # MJLab: isaaclab.managers → mjlab.managers
 from mjlab.managers.reward_manager import RewardTermCfg as RewTerm  # MJLab: isaaclab.managers → mjlab.managers
