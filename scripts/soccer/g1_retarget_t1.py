@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import mujoco
+import mujoco.viewer  # noqa: F401 — lazy submodule, must be imported explicitly
 import numpy as np
 
 # ── Joint mapping: G1 (MJLab order) → T1 ──────────────────────────────
