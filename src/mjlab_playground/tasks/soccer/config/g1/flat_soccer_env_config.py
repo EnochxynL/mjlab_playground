@@ -1,4 +1,6 @@
 import math
+import mujoco
+from pathlib import Path
 from dataclasses import dataclass, field  # MJLab: needed for @dataclass port of @configclass
 
 from mjlab.managers.observation_manager import ObservationTermCfg as ObsTerm  # MJLab: isaaclab.managers → mjlab.managers
@@ -9,7 +11,6 @@ from mjlab.sensor.contact_sensor import ContactSensorCfg  # MJLab: isaaclab.sens
 # MJLab: isaaclab.markers VisualizationMarkersCfg not available in MJLab (MuJoCo viewer)
 
 # MJLab: soccer.assets ASSET_DIR → MJLab uses XML-based ball asset (soccer_ball.xml)
-from .flat_env_config import SOCCER_BALL_RADIUS  # MJLab: soccer_ball radius constant
 # MJLab: soccer.robots.g1 G1_ACTION_SCALE, G1_CYLINDER_CFG → mjlab.asset_zoo.robots
 # MJLab: soccer.tasks.tracking.config.g1.agents.rsl_rl_ppo_cfg LOW_FREQ_SCALE → not ported
 # MJLab: soccer.tasks.tracking mdp → mjlab_playground.tasks.soccer.mdp
@@ -18,13 +19,27 @@ from ...tracking_env_config import TrackingEnvCfg, MySceneCfg, CurriculumCfg  # 
 from .flat_env_config import G1FlatEnvCfg  # MJLab: .flat_env_cfg → .flat_env_config
 
 # MJLab: isaaclab.terrains TerrainImporterCfg, TerrainGeneratorCfg → not available (MJLab terrain system differs)
+#
 # MJLab: isaaclab.terrains terrain_gen not available
+# MjLab: no TerrainGeneratorCfg
 
 from mjlab.managers.termination_manager import TerminationTermCfg as DoneTerm  # MJLab: isaaclab.managers → mjlab.managers
 
-SOCCER_BALL_RADIUS = SOCCER_BALL_RADIUS  # Re-export from flat_env_config
+SOCCER_BALL_RADIUS = 0.11
 
-# MJLab: SOCCER_ASSET_PATH = f"{ASSET_DIR}/soccer/soccer.usda" — USD asset not available; MJLab uses XML
+SOCCER_ASSET_PATH = Path(__file__).parents[2] / "mdp" / "soccer_ball.xml" # MJLab: SOCCER_ASSET_PATH = f"{ASSET_DIR}/soccer/soccer.usda" — USD asset not available; MJLab uses XML
+
+def _get_ball_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(SOCCER_ASSET_PATH))
+
+
+def get_soccer_ball_cfg() -> EntityCfg:
+    return EntityCfg(
+        spec_fn=_get_ball_spec,
+        init_state=EntityCfg.InitialStateCfg(
+            pos=(0.7, 0.0, SOCCER_BALL_RADIUS),
+        ),
+    )
 
 
 def _apply_soccer_obs(cfg):
@@ -72,7 +87,7 @@ class G1FlatSoccerSceneCfg(MySceneCfg):
 
     # MJLab: soccer_ball_contact ContactSensorCfg(prim_path=...) → ContactSensorCfg configured via ContactMatch in flat_env_config.py
     # soccer_ball_contact: ContactSensorCfg = ...  # MJLab: configured externally via scene.sensors
-
+    
 
 ## Environment configuration
 
