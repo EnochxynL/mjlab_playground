@@ -213,7 +213,7 @@ def feet_slip_penalty(env: ManagerBasedRLEnv, foot_cfg: SceneEntityCfg, slip_for
         return torch.zeros(num_envs, device=device, dtype=torch.float32)
     vertical_forces = forces[:, foot_indices, 2]
     contact_mask = vertical_forces > slip_force_threshold
-    foot_vel_w = robot.data.body_link_lin_vel_w[:, foot_indices]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
+    foot_vel_w = robot.data.body_com_lin_vel_w[:, foot_indices]  # MJLab: body_lin_vel_w → body_com_lin_vel_w
     penalize = torch.where(
         contact_mask.unsqueeze(-1), 
         torch.square(foot_vel_w), 
@@ -309,7 +309,7 @@ def sideways_kick(
         return reward
 
     robot = command.robot
-    foot_vel_w = robot.data.body_link_lin_vel_w[foot_info.env_ids, foot_info.body_indices]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
+    foot_vel_w = robot.data.body_com_lin_vel_w[foot_info.env_ids, foot_info.body_indices]  # MJLab: body_lin_vel_w → body_com_lin_vel_w
     foot_quat_w = robot.data.body_link_quat_w[foot_info.env_ids, foot_info.body_indices]  # MJLab: body_quat_w → body_link_quat_w
 
     vel_local = quat_apply(quat_inv(foot_quat_w), foot_vel_w)

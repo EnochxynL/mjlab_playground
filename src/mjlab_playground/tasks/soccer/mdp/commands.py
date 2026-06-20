@@ -159,7 +159,7 @@ class MotionCommand(CommandTerm):
 
     @property
     def robot_body_lin_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_link_lin_vel_w[:, self.body_indexes]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
+        return self.robot.data.body_com_lin_vel_w[:, self.body_indexes]  # MJLab: body_lin_vel_w → body_com_lin_vel_w
 
     @property
     def robot_body_ang_vel_w(self) -> torch.Tensor:
@@ -175,7 +175,7 @@ class MotionCommand(CommandTerm):
 
     @property
     def robot_anchor_lin_vel_w(self) -> torch.Tensor:
-        return self.robot.data.body_link_lin_vel_w[:, self.robot_anchor_body_index]  # MJLab: body_lin_vel_w → body_link_lin_vel_w
+        return self.robot.data.body_com_lin_vel_w[:, self.robot_anchor_body_index]  # MJLab: body_lin_vel_w → body_com_lin_vel_w
 
     @property
     def robot_anchor_ang_vel_w(self) -> torch.Tensor:

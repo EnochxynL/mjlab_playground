@@ -109,13 +109,17 @@ All `data.body_*_w` → `data.body_link_*_w`, `data.root_*_w` → `data.root_lin
 |---|---|
 | `data.body_pos_w` | `data.body_link_pos_w` |
 | `data.body_quat_w` | `data.body_link_quat_w` |
-| `data.body_lin_vel_w` | `data.body_link_lin_vel_w` |
+| `data.body_lin_vel_w` | `data.body_com_lin_vel_w` |
 | `data.body_ang_vel_w` | `data.body_link_ang_vel_w` |
 | `data.root_pos_w` | `data.root_link_pos_w` |
 | `data.root_lin_vel_w` | `data.root_link_lin_vel_w` |
 | `data.GRAVITY_VEC_W` | `data.gravity_vec_w` |
 
 Reason: MJLab uses `body_link_*` prefix for per-link properties, snake_case for property naming.
+**Important:** `body_lin_vel_w` is a special case — in IsaacLab it is a compatibility alias that resolves to
+`body_com_lin_vel_w` (COM frame velocity), NOT `body_link_lin_vel_w` (link frame velocity). MJLab exposes
+both `body_com_lin_vel_w` and `body_link_lin_vel_w` as separate properties with different semantics
+(link velocity = COM velocity + ω × (link_pos − com_pos)). The correct port uses `body_com_lin_vel_w`.
 
 ### 6. Contact sensor API
 
@@ -260,13 +264,17 @@ Reason: MJLab uses `body_link_*` prefix for per-link properties, snake_case for 
 |---|---|---|
 | `data.body_pos_w` | `data.body_link_pos_w` | `commands.py`, `commands_multi_motion_soccer.py`, `observations.py`, `rewards.py`, `kick_detection.py` |
 | `data.body_quat_w` | `data.body_link_quat_w` | `commands.py`, `commands_multi_motion_soccer.py`, `rewards.py` |
-| `data.body_lin_vel_w` | `data.body_link_lin_vel_w` | `commands.py`, `commands_multi_motion_soccer.py`, `rewards.py` |
+| `data.body_lin_vel_w` | `data.body_com_lin_vel_w` | `commands.py`, `commands_multi_motion_soccer.py`, `rewards.py` |
 | `data.body_ang_vel_w` | `data.body_link_ang_vel_w` | `commands.py`, `commands_multi_motion_soccer.py` |
 | `data.root_pos_w` | `data.root_link_pos_w` | `commands_multi_motion_soccer.py` |
 | `data.root_lin_vel_w` | `data.root_link_lin_vel_w` | `rewards.py`（多处） |
 | `data.GRAVITY_VEC_W` | `data.gravity_vec_w` | `terminations.py`, `rewards.py` |
 
 原因：MJLab对每个link的属性使用`body_link_*`前缀，属性命名统一用snake_case。
+**特别注意：** `body_lin_vel_w`与其他body属性不同。在IsaacLab中它是兼容性别名，
+实际解析为`body_com_lin_vel_w`（质心COM速度），而非`body_link_lin_vel_w`（连杆框架速度）。
+MJLab将两者作为独立属性暴露，语义不同（link速度 = COM速度 + ω × (link_pos − com_pos)）。
+正确移植应使用`body_com_lin_vel_w`。
 
 ### 6. 接触传感器API
 
@@ -397,7 +405,9 @@ Reason: MJLab uses `body_link_*` prefix for per-link properties, snake_case for 
 - snake_case全小写（`gravity_vec_w`而非`GRAVITY_VEC_W`）
 - MJLab中`body_*_w`保留用于"整个刚体的世界坐标"，`body_link_*_w`用于"每个link的世界坐标"
 
-**转换方式（How）**：全局替换。这些属性在MJLab的`EntityData`中定义，返回的张量形状和语义与IsaacLab完全相同，仅名称不同。
+**转换方式（How）**：大部分属性全局替换。这些属性在MJLab的`EntityData`中定义，返回的张量形状和语义与IsaacLab完全相同，仅名称不同。
+
+**`body_lin_vel_w`的特殊情况：** 此属性与`body_pos_w`等其他属性不同。在IsaacLab `ArticulationData`（`articulation_data.py:978-980`）中，`body_lin_vel_w`是一个兼容性别名，直接返回`body_com_lin_vel_w`（质心COM速度）。而`body_link_lin_vel_w`在IsaacLab中是不同的量——它在COM速度基础上加上`ω × (link_pos - com_pos)`偏移以得到连杆框架速度（`articulation_data.py:525-526`）。MJLab将两者作为独立属性暴露。由于原IsaacLab足球代码使用`body_lin_vel_w`（即COM速度），正确移植到MJLab应当使用`body_com_lin_vel_w`，而非`body_link_lin_vel_w`。该差异在快速腿部运动中可能产生数值影响。
 
 **转换原因（Why）**：MJLab选择更明确的前缀命名避免歧义（在多刚体实体中，"body"可能指整个实体或单个link），而snake_case与Python社区惯例一致。
 
