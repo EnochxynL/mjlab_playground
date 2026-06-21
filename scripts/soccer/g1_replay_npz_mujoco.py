@@ -146,12 +146,14 @@ def main() -> None:
   except AttributeError:
     pass
 
-  frame_dt = 1.0 / fps if args.speed > 0 else 0.0
+  frame_dt = (1.0 / fps / args.speed) if args.speed > 0 else 0.0
   print(f"Viewer open (speed={args.speed}x, dt={frame_dt:.3f}s/frame)")
 
   # ── Replay loop ────────────────────────────────────────────────────
   frame = 0
   while viewer.is_running():
+    frame_start = time.perf_counter()
+
     # Root pose from .npz.
     data.qpos[0:3] = g1_pelvis_pos[frame]
     data.qpos[3:7] = g1_pelvis_quat[frame]
@@ -168,8 +170,9 @@ def main() -> None:
     mujoco.mj_forward(model, data)
     viewer.sync()
 
-    if frame_dt > 0:
-      time.sleep(frame_dt / args.speed)
+    elapsed = time.perf_counter() - frame_start
+    if frame_dt > 0 and elapsed < frame_dt:
+      time.sleep(frame_dt - elapsed)
 
     frame = (frame + 1) % frames
 
