@@ -2,7 +2,7 @@
 
 Usage:
   uv run python scripts/soccer/g1_replay_npz.py \\
-    --motion-path data/soccer-standard/g1/soccer-standard-001_right.npz
+    --motion-path data/mjlab_playground-mjlab/soccer-standard/g1/soccer-standard-001_right.npz
 """
 
 from __future__ import annotations

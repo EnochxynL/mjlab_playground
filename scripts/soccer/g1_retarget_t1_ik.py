@@ -6,13 +6,13 @@ initial guess.
 
 Usage:
   uv run python scripts/soccer/g1_retarget_t1_ik.py \\
-    --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-standard/t1/soccer-standard-001_right.npz
+    --input data/mjlab_playground-mjlab/soccer-standard/g1/soccer-standard-001_right.npz \\
+    --output data/mjlab_playground-mjlab/soccer-standard/t1/soccer-standard-001_right.npz
 
   # With live viewer:
   uv run python scripts/soccer/g1_retarget_t1_ik.py \\
-    --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-standard/t1/soccer-standard-001_right.npz --view
+    --input data/mjlab_playground-mjlab/soccer-standard/g1/soccer-standard-001_right.npz \\
+    --output data/mjlab_playground-mjlab/soccer-standard/t1/soccer-standard-001_right.npz --view
 """
 
 from __future__ import annotations
