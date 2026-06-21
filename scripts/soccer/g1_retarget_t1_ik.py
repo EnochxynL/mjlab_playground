@@ -102,8 +102,6 @@ _t1_joint_name_to_idx: dict[str, int] = {}
 
 # ── End-effector mapping for IK ───────────────────────────────────────
 
-_IK_TARGETS = ("left_foot", "right_foot", "left_hand", "right_hand")
-
 _G1_EE_BODY_NAME: dict[str, str] = {
   "left_foot": "left_ankle_roll_link",
   "right_foot": "right_ankle_roll_link",
@@ -220,12 +218,6 @@ def main() -> None:
     type=float,
     default=1.0,
     help="Playback speed multiplier (1.0 = real time, 0 = max speed).",
-  )
-  parser.add_argument(
-    "--ik-foot-weight",
-    type=float,
-    default=10.0,
-    help="Weight multiplier for foot vs hand position error (default: 10.0).",
   )
   parser.add_argument(
     "--ik-max-iter",
