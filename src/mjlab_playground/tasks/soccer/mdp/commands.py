@@ -26,43 +26,6 @@ from mjlab.utils.lab_api.math import (  # MJLab: isaaclab.utils.math → mjlab.u
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv  # MJLab: isaaclab.envs ManagerBasedRLEnv → mjlab.envs ManagerBasedRlEnv
 
-# ── Joint-order remapping ──────────────────────────────────────────────
-# IsaacLab groups joints by type (all hip_pitch, then all hip_roll…),
-# MJCF groups by limb (left leg, right leg, waist, left arm, right arm).
-# .npz files use IsaacLab order; we permute on load so downstream code
-# always operates in MJCF / limb order.
-
-_ISAACLAB_JOINT_ORDER: tuple[str, ...] = (
-    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
-    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
-    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
-    "left_knee_joint", "right_knee_joint",
-    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
-    "left_ankle_pitch_joint", "right_ankle_pitch_joint",
-    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
-    "left_ankle_roll_joint", "right_ankle_roll_joint",
-    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
-    "left_elbow_joint", "right_elbow_joint",
-    "left_wrist_roll_joint", "right_wrist_roll_joint",
-    "left_wrist_pitch_joint", "right_wrist_pitch_joint",
-    "left_wrist_yaw_joint", "right_wrist_yaw_joint",
-)
-
-_MJLAB_JOINT_ORDER: tuple[str, ...] = (
-    "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
-    "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
-    "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
-    "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
-    "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
-    "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
-    "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
-    "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
-    "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
-)
-
-_isaac_to_idx = {n: i for i, n in enumerate(_ISAACLAB_JOINT_ORDER)}
-_ISAACLAB_TO_MUJOCO = [_isaac_to_idx[n] for n in _MJLAB_JOINT_ORDER]
-
 
 class MotionLoader:
     def __init__(self, motion_file: str, body_indexes: Sequence[int], device: str = "cpu"):
@@ -71,9 +34,6 @@ class MotionLoader:
         self.fps = data["fps"]
         self.joint_pos = torch.tensor(data["joint_pos"], dtype=torch.float32, device=device)
         self.joint_vel = torch.tensor(data["joint_vel"], dtype=torch.float32, device=device)
-        # .npz uses IsaacLab joint order → permute to MJCF limb order.
-        self.joint_pos = self.joint_pos[:, _ISAACLAB_TO_MUJOCO]
-        self.joint_vel = self.joint_vel[:, _ISAACLAB_TO_MUJOCO]
         self._body_pos_w = torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device)
         self._body_quat_w = torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device)
         self._body_lin_vel_w = torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device)

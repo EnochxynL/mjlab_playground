@@ -105,42 +105,8 @@ def main() -> None:
     sys.exit(1)
 
   fps = float(np.asarray(src["fps"]).reshape(-1)[0])
-  # .npz 的 joint_pos 列顺序是 IsaacLab（按关节类型分组），
-  # 而 MuJoCo MJCF 是 limb 顺序（左腿→右腿→腰→左臂→右臂）。
-  # 用 ISAACLAB_TO_MUJOCO_REINDEX 重排到 MuJoCo 顺序。
-  _ISAACLAB_TO_MUJOCO: list[int] = [
-    0,
-    3,
-    6,
-    9,
-    13,
-    17,
-    1,
-    4,
-    7,
-    10,
-    14,
-    18,
-    2,
-    5,
-    8,
-    11,
-    15,
-    19,
-    21,
-    23,
-    25,
-    27,
-    12,
-    16,
-    20,
-    22,
-    24,
-    26,
-    28,
-  ]
-  g1_joint_pos = src["joint_pos"][:, _ISAACLAB_TO_MUJOCO].astype(np.float64)
-  g1_joint_vel = src["joint_vel"][:, _ISAACLAB_TO_MUJOCO].astype(np.float64)
+  g1_joint_pos = src["joint_pos"].astype(np.float64)
+  g1_joint_vel = src["joint_vel"].astype(np.float64)
   g1_pelvis_pos = src["body_pos_w"][:, 0, :].astype(np.float64)
   g1_pelvis_quat = src["body_quat_w"][:, 0, :].astype(np.float64)
   print(f"Loaded G1 motion: {frames} frames, {fps} fps")
