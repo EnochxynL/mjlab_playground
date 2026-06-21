@@ -1,28 +1,18 @@
-"""Retarget a G1 motion .npz to the Booster T1 skeleton via MuJoCo FK (+ IK).
+"""Retarget a G1 motion .npz to the Booster T1 skeleton via inverse kinematics.
 
-Modes:
-  FK-only (default):  Direct 1:1 joint-angle copy.  Fast but can look
-      unnatural because the two robots have different limb proportions.
-
-  FK+IK (--ik):  Use inverse kinematics to match G1 end-effector positions
-      (feet + hands) on the T1 skeleton.  The FK-only result serves as the
-      initial guess.  Slower per frame but produces much more natural poses.
+Uses MuJoCo's Levenberg-Marquardt optimizer to match G1 end-effector positions
+(feet + hands) on the T1 skeleton. The FK-only mapped joint angles serve as the
+initial guess.
 
 Usage:
-  # FK-only (fast, default):
-  uv run python scripts/soccer/g1_retarget_t1.py \\
+  uv run python scripts/soccer/g1_retarget_t1_ik.py \\
     --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
     --output data/soccer-standard/t1/soccer-standard-001_right.npz
 
-  # FK+IK with live viewer (best quality):
-  uv run python scripts/soccer/g1_retarget_t1.py \\
+  # With live viewer:
+  uv run python scripts/soccer/g1_retarget_t1_ik.py \\
     --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-standard/t1/soccer-standard-001_right.npz --ik --view
-
-  # Regularized result:
-  uv run python scripts/soccer/g1_retarget_t1.py \\
-    --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-standard/t1/soccer-standard-001_right.npz --ik --view --ik-reg-weight 0.5
+    --output data/soccer-standard/t1/soccer-standard-001_right.npz
 """
 
 from __future__ import annotations
@@ -37,7 +27,7 @@ import mujoco.minimize  # noqa: F401 — lazy submodule
 import mujoco.viewer  # noqa: F401 — lazy submodule
 import numpy as np
 
-# ── Joint mapping: G1 (MJLab order) → T1 ──────────────────────────────
+# ── Joint mapping: G1 (MJLab/limb order) → T1 ─────────────────────────
 
 _G1_JOINT_NAMES = (
   "left_hip_pitch_joint",
@@ -70,12 +60,6 @@ _G1_JOINT_NAMES = (
   "right_wrist_pitch_joint",
   "right_wrist_yaw_joint",
 )
-
-# Which T1 joint each G1 joint maps to (None = no counterpart).
-_G1_TO_T1: dict[int, int | None] = {}
-
-# T1 joint names in XML order — filled after model load.
-_t1_joint_name_to_idx: dict[str, int] = {}
 
 _G1_NAME_TO_T1_NAME: dict[str, str | None] = {
   # Legs — direct 1:1.
@@ -112,11 +96,14 @@ _G1_NAME_TO_T1_NAME: dict[str, str | None] = {
   "right_wrist_yaw_joint": None,
 }
 
+# Internal lookup tables — filled after T1 model load.
+_G1_TO_T1: dict[int, int | None] = {}
+_t1_joint_name_to_idx: dict[str, int] = {}
+
 # ── End-effector mapping for IK ───────────────────────────────────────
 
 _IK_TARGETS = ("left_foot", "right_foot", "left_hand", "right_hand")
 
-# G1 body names in the source .npz → role key.
 _G1_EE_BODY_NAME: dict[str, str] = {
   "left_foot": "left_ankle_roll_link",
   "right_foot": "right_ankle_roll_link",
@@ -124,7 +111,6 @@ _G1_EE_BODY_NAME: dict[str, str] = {
   "right_hand": "right_wrist_yaw_link",
 }
 
-# T1 body names in the XML → role key.
 _T1_EE_BODY_NAME: dict[str, str] = {
   "left_foot": "left_foot_link",
   "right_foot": "right_foot_link",
@@ -142,11 +128,12 @@ def _t1_xml_path() -> Path:
 
 def _resolve_indices(model: mujoco.MjModel) -> None:
   """Fill _t1_joint_name_to_idx and _G1_TO_T1 from the compiled model."""
+  _t1_joint_name_to_idx.clear()
+  _G1_TO_T1.clear()
   for i in range(model.njnt):
     name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i)
     if name and model.jnt_type[i] != mujoco.mjtJoint.mjJNT_FREE:
       _t1_joint_name_to_idx[name] = i
-
   for g1_idx, g1_name in enumerate(_G1_JOINT_NAMES):
     t1_name = _G1_NAME_TO_T1_NAME.get(g1_name)
     if t1_name and t1_name in _t1_joint_name_to_idx:
@@ -166,36 +153,28 @@ def _solve_ik(
   lower: np.ndarray,
   upper: np.ndarray,
   max_iter: int,
-  reg_weight: float = 0.1,
 ) -> tuple[np.ndarray, object]:
-  """Solve IK for one frame: match T1 body positions to *targets*.
-
-  *joint_order* lists MuJoCo joint indices in the order *x* is laid out.
-  *reg_weight* penalises deviation from the FK-only initial guess *x0*,
-  preventing extreme joint angles when targets are unreachable.
-  """
+  """Solve IK for one frame: match T1 body positions to *targets*."""
 
   n_joints = len(joint_order)
   n_ee = len(body_ids) * 3
-  n_total = n_ee + n_joints
 
   def residual(x: np.ndarray) -> np.ndarray:
     x = np.asarray(x).ravel()
     for out_idx, t1_mu_idx in enumerate(joint_order):
       data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(x[out_idx])
     mujoco.mj_forward(model, data)
-    res = np.zeros((n_total, 1), dtype=np.float64)
+    res = np.zeros((n_ee, 1), dtype=np.float64)
     for i, bid in enumerate(body_ids):
       err = data.xpos[bid] - targets[i]
       w = weights[i]
       res[i * 3, 0] = err[0] * w
       res[i * 3 + 1, 0] = err[1] * w
       res[i * 3 + 2, 0] = err[2] * w
-    res[n_ee:, 0] = (x - x0) * reg_weight
     return res
 
   def jacobian(x: np.ndarray, _r: np.ndarray) -> np.ndarray:
-    jac = np.zeros((n_total, n_joints), dtype=np.float64)
+    jac = np.zeros((n_ee, n_joints), dtype=np.float64)
     for i, bid in enumerate(body_ids):
       jacp = np.zeros((3, model.nv), dtype=np.float64)
       mujoco.mj_jacBody(model, data, jacp, None, bid)
@@ -205,7 +184,6 @@ def _solve_ik(
         jac[i * 3, out_idx] = jacp[0, dof_adr] * w
         jac[i * 3 + 1, out_idx] = jacp[1, dof_adr] * w
         jac[i * 3 + 2, out_idx] = jacp[2, dof_adr] * w
-    jac[n_ee:, :] = np.eye(n_joints) * reg_weight
     return jac
 
   return mujoco.minimize.least_squares(
@@ -222,7 +200,7 @@ def _solve_ik(
 
 def main() -> None:
   parser = argparse.ArgumentParser(
-    description="Retarget G1 motion .npz to Booster T1 skeleton"
+    description="Retarget G1 motion .npz to Booster T1 via IK"
   )
   parser.add_argument("--input", required=True, help="Path to G1 motion .npz")
   parser.add_argument("--output", required=True, help="Path for T1 motion .npz")
@@ -243,12 +221,6 @@ def main() -> None:
     default=1.0,
     help="Playback speed multiplier (1.0 = real time, 0 = max speed).",
   )
-  # ── IK mode options ─────────────────────────────────────────────────
-  parser.add_argument(
-    "--ik",
-    action="store_true",
-    help="Enable FK+IK mode: match G1 end-effector positions via inverse kinematics.",
-  )
   parser.add_argument(
     "--ik-foot-weight",
     type=float,
@@ -266,13 +238,6 @@ def main() -> None:
     type=float,
     default=0.95,
     help="Uniform scale applied to G1 body positions relative to pelvis (default: 0.95).",
-  )
-  parser.add_argument(
-    "--ik-reg-weight",
-    type=float,
-    default=0.1,
-    help="IK regularisation weight: penalises deviation from FK-only initial guess "
-    "(default: 0.1). Increase if joints swing wildly.",
   )
   args = parser.parse_args()
 
@@ -292,10 +257,7 @@ def main() -> None:
       sys.exit(1)
 
   frames = int(src["joint_pos"].shape[0])
-  # .npz 的 joint_pos 列顺序是 IsaacLab（按关节类型分组），
-  # 而 _G1_JOINT_NAMES 及 MuJoCo MJCF 是 limb 顺序（左腿→右腿→腰→左臂→右臂）。
-  # 重排到 limb 顺序以匹配 _G1_JOINT_NAMES 的索引。
-  _ISAACLAB_TO_MUJOCO: list[int] = [
+  _ISAACLAB_TO_LIMB: list[int] = [
     0,
     3,
     6,
@@ -326,7 +288,7 @@ def main() -> None:
     26,
     28,
   ]
-  g1_joint_pos = src["joint_pos"][:, _ISAACLAB_TO_MUJOCO].astype(np.float64)
+  g1_joint_pos = src["joint_pos"][:, _ISAACLAB_TO_LIMB].astype(np.float64)
   g1_pelvis_pos = src["body_pos_w"][:, 0, :].astype(np.float64)
   g1_pelvis_quat = src["body_quat_w"][:, 0, :].astype(np.float64)
   g1_body_pos_w = src["body_pos_w"].astype(np.float64)
@@ -334,8 +296,6 @@ def main() -> None:
   if "body_names" in src:
     g1_body_names = [str(n) for n in src["body_names"]]
   elif g1_body_pos_w.shape[1] == 30:
-    # IsaacLab body order (grouped by joint type, L/R interleaved).
-    # From HumanoidSoccer constants.py BODY_NAMES.
     g1_body_names = [
       "pelvis",
       "left_hip_pitch_link",
@@ -382,7 +342,7 @@ def main() -> None:
   n_t1_joints = sum(
     1 for i in range(model.njnt) if model.jnt_type[i] != mujoco.mjtJoint.mjJNT_FREE
   )
-  n_t1_bodies = model.nbody - 1  # exclude body 0 ('world')
+  n_t1_bodies = model.nbody - 1
   print(f"T1 model: {n_t1_joints} joints, {n_t1_bodies} bodies")
 
   _t1_joint_output_order = sorted(_t1_joint_name_to_idx.values())
@@ -394,54 +354,52 @@ def main() -> None:
   print(f"Joint mapping: {mapped}/{len(_G1_JOINT_NAMES)} G1 joints map to T1")
 
   # ── Resolve IK target body indices ──────────────────────────────────
-  ik_enabled = args.ik
-  if ik_enabled:
-    g1_name_to_idx: dict[str, int] = {}
-    for i, name in enumerate(g1_body_names):
-      g1_name_to_idx[name] = i
+  g1_name_to_idx: dict[str, int] = {}
+  for i, name in enumerate(g1_body_names):
+    g1_name_to_idx[name] = i
 
-    g1_ee_idx: dict[str, int] = {}
-    t1_ee_id: dict[str, int] = {}
-    for key in _IK_TARGETS:
-      g1_bname = _G1_EE_BODY_NAME[key]
-      t1_bname = _T1_EE_BODY_NAME[key]
-      if g1_bname not in g1_name_to_idx:
-        print(
-          f"ERROR: G1 body '{g1_bname}' not found in source npz body_names",
-          file=sys.stderr,
-        )
-        print(f"  Available: {g1_body_names}", file=sys.stderr)
-        sys.exit(1)
-      g1_ee_idx[key] = g1_name_to_idx[g1_bname]
-      t1_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, t1_bname)
-      if t1_id < 0:
-        print(
-          f"ERROR: T1 body '{t1_bname}' not found in T1 model",
-          file=sys.stderr,
-        )
-        sys.exit(1)
-      t1_ee_id[key] = t1_id
-    print(f"IK targets: {list(_IK_TARGETS)}")
-    print(f"  height-scale={args.height_scale}, foot-weight={args.ik_foot_weight}")
+  g1_ee_idx: dict[str, int] = {}
+  t1_ee_id: dict[str, int] = {}
+  for key in _IK_TARGETS:
+    g1_bname = _G1_EE_BODY_NAME[key]
+    t1_bname = _T1_EE_BODY_NAME[key]
+    if g1_bname not in g1_name_to_idx:
+      print(
+        f"ERROR: G1 body '{g1_bname}' not found in source npz body_names",
+        file=sys.stderr,
+      )
+      print(f"  Available: {g1_body_names}", file=sys.stderr)
+      sys.exit(1)
+    g1_ee_idx[key] = g1_name_to_idx[g1_bname]
+    t1_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, t1_bname)
+    if t1_id < 0:
+      print(
+        f"ERROR: T1 body '{t1_bname}' not found in T1 model",
+        file=sys.stderr,
+      )
+      sys.exit(1)
+    t1_ee_id[key] = t1_id
+  print(f"IK targets: {list(_IK_TARGETS)}")
+  print(f"  height-scale={args.height_scale}, foot-weight={args.ik_foot_weight}")
 
-    # Pre-compute joint bounds in IK order.
-    ik_lower = np.zeros(n_t1_joints, dtype=np.float64)
-    ik_upper = np.zeros(n_t1_joints, dtype=np.float64)
-    for t1_mu_idx in _t1_joint_output_order:
-      out_idx = _t1_joint_out_idx[t1_mu_idx]
-      ik_lower[out_idx] = model.jnt_range[t1_mu_idx, 0]
-      ik_upper[out_idx] = model.jnt_range[t1_mu_idx, 1]
+  # Pre-compute joint bounds in IK order.
+  ik_lower = np.zeros(n_t1_joints, dtype=np.float64)
+  ik_upper = np.zeros(n_t1_joints, dtype=np.float64)
+  for t1_mu_idx in _t1_joint_output_order:
+    out_idx = _t1_joint_out_idx[t1_mu_idx]
+    ik_lower[out_idx] = model.jnt_range[t1_mu_idx, 0]
+    ik_upper[out_idx] = model.jnt_range[t1_mu_idx, 1]
 
-    # Weight array: feet get higher weight, hands weight=1.0.
-    ik_weights = np.array(
-      [
-        args.ik_foot_weight,  # left_foot
-        args.ik_foot_weight,  # right_foot
-        1.0,  # left_hand
-        1.0,  # right_hand
-      ],
-      dtype=np.float64,
-    )
+  # Weight array: feet get higher weight, hands weight=1.0.
+  ik_weights = np.array(
+    [
+      args.ik_foot_weight,  # left_foot
+      args.ik_foot_weight,  # right_foot
+      1.0,  # left_hand
+      1.0,  # right_hand
+    ],
+    dtype=np.float64,
+  )
 
   # ── Viewer (optional) ──────────────────────────────────────────────
   viewer = None
@@ -460,60 +418,49 @@ def main() -> None:
   t1_body_ang_vel_w = np.zeros((frames, n_t1_bodies, 3), dtype=np.float32)
 
   ik_failures = 0
+  t1_body_ids = [t1_ee_id[k] for k in _IK_TARGETS]
 
   for frame in range(frames):
-    # Root pose: copy G1 pelvis xy + orientation, use T1 default z.
     root_pos = g1_pelvis_pos[frame].copy()
     root_pos[2] = args.t1_default_z
     root_quat = g1_pelvis_quat[frame].copy()
     data.qpos[0:3] = root_pos
     data.qpos[3:7] = root_quat
 
-    if ik_enabled:
-      # ── FK+IK path ──────────────────────────────────────────────
-      targets_w = np.zeros((4, 3), dtype=np.float64)
-      for ki, key in enumerate(_IK_TARGETS):
-        g1_pos = g1_body_pos_w[frame, g1_ee_idx[key]]
-        offset = g1_pos - g1_pelvis_pos[frame]
-        targets_w[ki] = root_pos + args.height_scale * offset
+    # Build IK targets in world frame.
+    targets_w = np.zeros((4, 3), dtype=np.float64)
+    for ki, key in enumerate(_IK_TARGETS):
+      g1_pos = g1_body_pos_w[frame, g1_ee_idx[key]]
+      offset = g1_pos - g1_pelvis_pos[frame]
+      targets_w[ki] = root_pos + args.height_scale * offset
 
-      x0 = np.zeros(n_t1_joints, dtype=np.float64)
-      for g1_idx, t1_idx in _G1_TO_T1.items():
-        if t1_idx is not None:
-          x0[_t1_joint_out_idx[t1_idx]] = g1_joint_pos[frame, g1_idx]
-      x0 = np.clip(x0, ik_lower, ik_upper)
+    # FK-only mapped angles as initial guess.
+    x0 = np.zeros(n_t1_joints, dtype=np.float64)
+    for g1_idx, t1_idx in _G1_TO_T1.items():
+      if t1_idx is not None:
+        x0[_t1_joint_out_idx[t1_idx]] = g1_joint_pos[frame, g1_idx]
+    x0 = np.clip(x0, ik_lower, ik_upper)
 
-      t1_body_ids = [t1_ee_id[k] for k in _IK_TARGETS]
+    result, _trace = _solve_ik(
+      model,
+      data,
+      _t1_joint_output_order,
+      x0,
+      t1_body_ids,
+      targets_w,
+      ik_weights,
+      ik_lower,
+      ik_upper,
+      args.ik_max_iter,
+    )
 
-      result, _trace = _solve_ik(
-        model,
-        data,
-        _t1_joint_output_order,
-        x0,
-        t1_body_ids,
-        targets_w,
-        ik_weights,
-        ik_lower,
-        ik_upper,
-        args.ik_max_iter,
-        reg_weight=args.ik_reg_weight,
-      )
+    if _trace[-1].objective > 10.0:
+      ik_failures += 1
 
-      if _trace[-1].objective > 10.0:
-        ik_failures += 1
+    for out_idx, t1_mu_idx in enumerate(_t1_joint_output_order):
+      data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(result[out_idx])
 
-      for out_idx, t1_mu_idx in enumerate(_t1_joint_output_order):
-        data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(result[out_idx])
-
-      mujoco.mj_forward(model, data)
-
-    else:
-      # ── FK-only path ────────────────────────────────────────────
-      for g1_idx, t1_idx in _G1_TO_T1.items():
-        if t1_idx is not None:
-          data.qpos[model.jnt_qposadr[t1_idx]] = g1_joint_pos[frame, g1_idx]
-
-      mujoco.mj_forward(model, data)
+    mujoco.mj_forward(model, data)
 
     # Record joint positions and velocities.
     for _t1_name, t1_mu_idx in _t1_joint_name_to_idx.items():
@@ -521,7 +468,6 @@ def main() -> None:
       t1_joint_pos[frame, out_idx] = float(data.qpos[model.jnt_qposadr[t1_mu_idx]])
       t1_joint_vel[frame, out_idx] = float(data.qvel[model.jnt_dofadr[t1_mu_idx]])
 
-    # Body 0 is 'world' — skip it.
     for body_idx in range(1, model.nbody):
       out_body = body_idx - 1
       t1_body_pos_w[frame, out_body] = data.xpos[body_idx]
@@ -536,11 +482,10 @@ def main() -> None:
       if frame_dt is not None and frame_dt > 0:
         time.sleep(frame_dt / args.speed)
 
-  # ── Cleanup ─────────────────────────────────────────────────────────
   if viewer is not None:
     viewer.close()
 
-  if ik_enabled and ik_failures > 0:
+  if ik_failures > 0:
     print(f"IK: {ik_failures}/{frames} frames did not converge (using last iterate)")
 
   # ── Export ──────────────────────────────────────────────────────────
