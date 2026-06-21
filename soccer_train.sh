@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# Progressive soccer training: two-stage pipeline for G1.
+# Progressive soccer training: two-stage pipeline for Booster T1.
 #
-# Stage 1 (Mjlab-SoccerTracking-G1):
+# Stage 1 (Mjlab-SoccerTracking-T1):
 #   adaptive sampling, tracking rewards only + soccer observations.
 #   Learns to reproduce kick motions without ball contact.
 #
-# Stage 2 (Mjlab-SoccerDestination-G1):
+# Stage 2 (Mjlab-SoccerDestination-T1):
 #   uniform sampling, tracking + full kick rewards.
 #   Fine-tunes Stage 1 checkpoint to actually kick the ball.
 #
 # Usage:
-#   ./progressive_soccer_train.sh [RUN_NAME]
-#   ./progressive_soccer_train.sh my_experiment
+#   ./soccer_train.sh [RUN_NAME]
+#   ./soccer_train.sh my_experiment
 #
 # Reference: arXiv-2602.05310v1 "Learning Soccer Skills for Humanoid Robots"
 # Ported from HumanoidSoccer/shell/progressive_soccer_train_play.sh
@@ -23,14 +23,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Shared experiment directory (both stages use experiment_name=g1_soccer)
-EXPERIMENT_DIR="${REPO_ROOT}/logs/rsl_rl/g1_soccer"
+# Shared experiment directory (both stages use experiment_name=t1_soccer)
+EXPERIMENT_DIR="${REPO_ROOT}/logs/rsl_rl/t1_soccer"
 
 RUN_NAME="${1:-test}"
 
 # ── motion files ──────────────────────────────────────────────
 
-MOTION_DIR="${REPO_ROOT}/data/soccer-standard"
+MOTION_DIR="${REPO_ROOT}/data/mjlab_playground-mjlab/soccer-standard/t1"
 MOTION_FILES=(
     "${MOTION_DIR}/soccer-standard-001_right.npz"
     "${MOTION_DIR}/soccer-standard-002_left.npz"
@@ -66,13 +66,13 @@ cd "${REPO_ROOT}"
 # ── Stage 1: motion-skill acquisition ─────────────────────────
 
 echo "=============================================="
-echo " Stage 1: Mjlab-SoccerTracking-G1"
+echo " Stage 1: Mjlab-SoccerTracking-T1"
 echo " run_name: ${RUN_NAME}"
 echo " num_envs: ${NUM_ENVS}"
 echo " max_iters: ${STAGE1_ITERS}"
 echo "=============================================="
 
-python -m mjlab.scripts.train Mjlab-SoccerTracking-G1 \
+python -m mjlab.scripts.train Mjlab-SoccerTracking-T1 \
     --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE1_ITERS}" \
@@ -96,14 +96,14 @@ echo ""
 # ── Stage 2: kick-to-destination fine-tuning ──────────────────
 
 echo "=============================================="
-echo " Stage 2: Mjlab-SoccerDestination-G1"
+echo " Stage 2: Mjlab-SoccerDestination-T1"
 echo " load_run: ${LOAD_RUN}"
 echo " run_name: ${RUN_NAME}_resume"
 echo " num_envs: ${NUM_ENVS}"
 echo " max_iters: ${STAGE2_ITERS}"
 echo "=============================================="
 
-python -m mjlab.scripts.train Mjlab-SoccerDestination-G1 \
+python -m mjlab.scripts.train Mjlab-SoccerDestination-T1 \
     --env.commands.motion.motion_files "${_MOTION_JSON}" \
     --env.scene.num-envs "${NUM_ENVS}" \
     --agent.max_iterations "${STAGE2_ITERS}" \

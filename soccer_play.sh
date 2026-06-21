@@ -3,18 +3,20 @@
 # Play a trained soccer policy (or watch with zero/random).
 #
 # Usage:
-#   # Trained policy
-#   ./soccer_play.sh Mjlab-SoccerTracking-G1 \
-#       logs/rsl_rl/g1_soccer/my_run/model_4000.pt \
-#       data/soccer-standard/soccer-standard-001_right.npz
+#   # Trained policy (T1 example)
+#   ./soccer_play.sh Mjlab-SoccerTracking-T1 \
+#       logs/rsl_rl/t1_soccer/my_run/model_4000.pt \
+#       data/mjlab_playground-mjlab/soccer-standard/t1/soccer-standard-001_right.npz
 #
 #   # Zero actions (just watch the motion)
-#   ./soccer_play.sh Mjlab-SoccerTracking-G1 --zero \
-#       data/soccer-standard/soccer-standard-001_right.npz
+#   ./soccer_play.sh Mjlab-SoccerTracking-T1 --zero \
+#       data/mjlab_playground-mjlab/soccer-standard/t1/soccer-standard-001_right.npz
 #
 #   # Random actions
-#   ./soccer_play.sh Mjlab-SoccerTracking-G1 --random \
-#       data/soccer-standard/soccer-standard-001_right.npz
+#   ./soccer_play.sh Mjlab-SoccerTracking-T1 --random \
+#       data/mjlab_playground-mjlab/soccer-standard/t1/soccer-standard-001_right.npz
+#
+#   # G1 works the same way — just swap the task ID and motion path.
 # ──────────────────────────────────────────────────────────
 
 set -euo pipefail
