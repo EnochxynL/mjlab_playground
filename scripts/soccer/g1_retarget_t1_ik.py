@@ -12,7 +12,7 @@ Usage:
   # With live viewer:
   uv run python scripts/soccer/g1_retarget_t1_ik.py \\
     --input data/soccer-standard/g1/soccer-standard-001_right.npz \\
-    --output data/soccer-standard/t1/soccer-standard-001_right.npz
+    --output data/soccer-standard/t1/soccer-standard-001_right.npz --view
 """
 
 from __future__ import annotations
@@ -353,14 +353,37 @@ def main() -> None:
   mapped = sum(1 for v in _G1_TO_T1.values() if v is not None)
   print(f"Joint mapping: {mapped}/{len(_G1_JOINT_NAMES)} G1 joints map to T1")
 
-  # ── Resolve IK target body indices ──────────────────────────────────
+  # ── Split joints: upper-body IK, lower-body FK ─────────────────────
+  # Arm G1 indices (limb order) → T1, for IK.
+  _ARM_G1_INDICES = tuple(range(15, 29))  # shoulders through wrists
+  # IK joint group: only arm joints that map to T1.
+  ik_joint_order: list[int] = []  # T1 mu_idx, in IK variable order
+  ik_joint_out_idx: dict[int, int] = {}  # T1 mu_idx → IK variable index
+  for g1_idx in _ARM_G1_INDICES:
+    t1_idx = _G1_TO_T1.get(g1_idx)
+    if t1_idx is not None:
+      ik_joint_out_idx[t1_idx] = len(ik_joint_order)
+      ik_joint_order.append(t1_idx)
+
+  # FK joint group: all mapped non-arm joints (legs + waist).
+  fk_joint_qposadr: dict[int, int] = {}  # T1 mu_idx → qpos_adr
+  for g1_idx, t1_idx in _G1_TO_T1.items():
+    if t1_idx is not None and g1_idx not in _ARM_G1_INDICES:
+      fk_joint_qposadr[t1_idx] = model.jnt_qposadr[t1_idx]
+
+  n_ik_joints = len(ik_joint_order)
+  n_fk_joints = len(fk_joint_qposadr)
+  print(f"IK joints (arms): {n_ik_joints}, FK joints (legs+waist): {n_fk_joints}")
+
+  # IK targets: hands only (feet are FK, no need to constrain).
+  _HAND_TARGETS = ("left_hand", "right_hand")
   g1_name_to_idx: dict[str, int] = {}
   for i, name in enumerate(g1_body_names):
     g1_name_to_idx[name] = i
 
   g1_ee_idx: dict[str, int] = {}
   t1_ee_id: dict[str, int] = {}
-  for key in _IK_TARGETS:
+  for key in _HAND_TARGETS:
     g1_bname = _G1_EE_BODY_NAME[key]
     t1_bname = _T1_EE_BODY_NAME[key]
     if g1_bname not in g1_name_to_idx:
@@ -368,7 +391,6 @@ def main() -> None:
         f"ERROR: G1 body '{g1_bname}' not found in source npz body_names",
         file=sys.stderr,
       )
-      print(f"  Available: {g1_body_names}", file=sys.stderr)
       sys.exit(1)
     g1_ee_idx[key] = g1_name_to_idx[g1_bname]
     t1_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, t1_bname)
@@ -379,27 +401,19 @@ def main() -> None:
       )
       sys.exit(1)
     t1_ee_id[key] = t1_id
-  print(f"IK targets: {list(_IK_TARGETS)}")
-  print(f"  height-scale={args.height_scale}, foot-weight={args.ik_foot_weight}")
+  print(f"IK targets (hands): {list(_HAND_TARGETS)}")
+  print(f"  height-scale={args.height_scale}")
 
-  # Pre-compute joint bounds in IK order.
-  ik_lower = np.zeros(n_t1_joints, dtype=np.float64)
-  ik_upper = np.zeros(n_t1_joints, dtype=np.float64)
-  for t1_mu_idx in _t1_joint_output_order:
-    out_idx = _t1_joint_out_idx[t1_mu_idx]
-    ik_lower[out_idx] = model.jnt_range[t1_mu_idx, 0]
-    ik_upper[out_idx] = model.jnt_range[t1_mu_idx, 1]
+  # Hand IK: equal weights for both hands.
+  ik_weights = np.ones(len(_HAND_TARGETS), dtype=np.float64)
 
-  # Weight array: feet get higher weight, hands weight=1.0.
-  ik_weights = np.array(
-    [
-      args.ik_foot_weight,  # left_foot
-      args.ik_foot_weight,  # right_foot
-      1.0,  # left_hand
-      1.0,  # right_hand
-    ],
-    dtype=np.float64,
-  )
+  # Pre-compute arm joint bounds.
+  ik_lower = np.zeros(n_ik_joints, dtype=np.float64)
+  ik_upper = np.zeros(n_ik_joints, dtype=np.float64)
+  for t1_mu_idx in ik_joint_order:
+    oi = ik_joint_out_idx[t1_mu_idx]
+    ik_lower[oi] = model.jnt_range[t1_mu_idx, 0]
+    ik_upper[oi] = model.jnt_range[t1_mu_idx, 1]
 
   # ── Viewer (optional) ──────────────────────────────────────────────
   viewer = None
@@ -418,35 +432,51 @@ def main() -> None:
   t1_body_ang_vel_w = np.zeros((frames, n_t1_bodies, 3), dtype=np.float32)
 
   ik_failures = 0
-  t1_body_ids = [t1_ee_id[k] for k in _IK_TARGETS]
+  t1_hand_body_ids = [t1_ee_id[k] for k in _HAND_TARGETS]
+  # Unmapped T1 joints: set to zero (no G1 counterpart).
+  mapped_t1_mu_indices: set[int] = set()
+  for t1_idx in _G1_TO_T1.values():
+    if t1_idx is not None:
+      mapped_t1_mu_indices.add(t1_idx)
 
   for frame in range(frames):
+    # Root pose.
     root_pos = g1_pelvis_pos[frame].copy()
     root_pos[2] = args.t1_default_z
     root_quat = g1_pelvis_quat[frame].copy()
     data.qpos[0:3] = root_pos
     data.qpos[3:7] = root_quat
 
-    # Build IK targets in world frame.
-    targets_w = np.zeros((4, 3), dtype=np.float64)
-    for ki, key in enumerate(_IK_TARGETS):
+    # FK group (legs + waist): direct copy from G1 mapped angles.
+    for g1_idx, t1_mu_idx in _G1_TO_T1.items():
+      if t1_mu_idx is not None and g1_idx not in _ARM_G1_INDICES:
+        data.qpos[model.jnt_qposadr[t1_mu_idx]] = g1_joint_pos[frame, g1_idx]
+
+    # Unmapped T1 joints: zero / nominal.
+    for t1_mu_idx in _t1_joint_name_to_idx.values():
+      if t1_mu_idx not in mapped_t1_mu_indices:
+        data.qpos[model.jnt_qposadr[t1_mu_idx]] = 0.0
+
+    # Build IK targets for hands (world frame).
+    targets_w = np.zeros((2, 3), dtype=np.float64)
+    for ki, key in enumerate(_HAND_TARGETS):
       g1_pos = g1_body_pos_w[frame, g1_ee_idx[key]]
       offset = g1_pos - g1_pelvis_pos[frame]
       targets_w[ki] = root_pos + args.height_scale * offset
 
-    # FK-only mapped angles as initial guess.
-    x0 = np.zeros(n_t1_joints, dtype=np.float64)
-    for g1_idx, t1_idx in _G1_TO_T1.items():
-      if t1_idx is not None:
-        x0[_t1_joint_out_idx[t1_idx]] = g1_joint_pos[frame, g1_idx]
+    # IK initial guess: FK-mapped arm angles from G1.
+    x0 = np.zeros(n_ik_joints, dtype=np.float64)
+    for g1_idx, t1_mu_idx in _G1_TO_T1.items():
+      if t1_mu_idx is not None and g1_idx in _ARM_G1_INDICES:
+        x0[ik_joint_out_idx[t1_mu_idx]] = g1_joint_pos[frame, g1_idx]
     x0 = np.clip(x0, ik_lower, ik_upper)
 
     result, _trace = _solve_ik(
       model,
       data,
-      _t1_joint_output_order,
+      ik_joint_order,
       x0,
-      t1_body_ids,
+      t1_hand_body_ids,
       targets_w,
       ik_weights,
       ik_lower,
@@ -457,8 +487,9 @@ def main() -> None:
     if _trace[-1].objective > 10.0:
       ik_failures += 1
 
-    for out_idx, t1_mu_idx in enumerate(_t1_joint_output_order):
-      data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(result[out_idx])
+    # Apply IK result (arm joints).
+    for oi, t1_mu_idx in enumerate(ik_joint_order):
+      data.qpos[model.jnt_qposadr[t1_mu_idx]] = float(result[oi])
 
     mujoco.mj_forward(model, data)
 
