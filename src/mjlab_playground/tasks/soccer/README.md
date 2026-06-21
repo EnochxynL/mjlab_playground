@@ -206,6 +206,44 @@ both `body_com_lin_vel_w` and `body_link_lin_vel_w` as separate properties with 
 
 ---
 
+## 关节顺序映射 (Joint Order Remapping)
+
+### 问题
+
+G1 的 29 个关节在 IsaacLab 和 MuJoCo/MJCF 中排列顺序不同：
+
+- **IsaacLab 顺序**（按关节类型分组）：所有 `hip_pitch` → 所有 `hip_roll` → 所有 `hip_yaw` → ...
+- **MuJoCo/MJCF 顺序**（按肢体分组）：左腿全部关节 → 右腿全部关节 → 腰部 → 左臂 → 右臂
+
+`.npz` 运动文件使用 IsaacLab 顺序存储 `joint_pos` / `joint_vel`，但仿真器（MJCF 模型）使用 limb 顺序。将 `.npz` 数据直接写入仿真器会导致关节数据错位（例如左膝角度被写入右髋关节）。
+
+### 排列
+
+```python
+_ISAACLAB_TO_MUJOCO = [0, 3, 6, 9, 13, 17, 1, 4, 7, 10, 14, 18, 2, 5, 8, 11, 15, 19, 21, 23, 25, 27, 12, 16, 20, 22, 24, 26, 28]
+```
+
+逆排列（MJCF → IsaacLab）：`[0, 6, 12, 1, 7, 13, 2, 8, 14, 3, 9, 22, 23, 4, 10, 24, 21, 5, 11, 25, 26, 18, 19, 27, 17, 20, 28, 15, 16]`
+
+### 修复位置
+
+| 文件 | 修复方式 |
+|------|----------|
+| `mdp/commands.py` | `MotionLoader.__init__` 中加载后排列 `joint_pos`/`joint_vel` |
+| `mdp/commands_multi_motion.py` | `MultiMotionLoader.__init__` 中加载后排列 |
+| `mdp/commands_multi_motion_soccer.py` | `MultiMotionLoader.__init__` 中加载后排列 |
+| `scripts/soccer/play_onnx.py` | 删除 `_remap_motion_file`（Loader 已内部处理），保留 ONNX I/O 排列 |
+| `scripts/soccer/g1_replay_npz_mjlab.py` | 删除显式排列（`MotionLoader` 已内部处理） |
+| `scripts/soccer/g1_replay_npz_mujoco.py` | **保留**显式排列（直接用 `np.load`，不经过 Loader） |
+| `scripts/soccer/g1_retarget_t1.py` | **保留**显式排列（直接用 `np.load`，不经过 Loader） |
+
+### 影响
+
+- 已训练的策略模型（使用旧代码训练）：观测向量中的 `command` 项关节顺序与 `joint_pos`/`joint_vel` 不一致，策略已学习隐式重映射。用新代码重训可提高样本效率。
+- 已生成的 T1 重定向 `.npz`：旧文件使用了错误的 G1 关节映射，需用修复后的 `g1_retarget_t1.py` 重新生成。
+
+---
+
 ## API差异对照表（中文）
 
 以下逐一列出所有强制API差异，并标出差异出现的文件名。每项差异都是MJLab与IsaacLab底层API不兼容导致的，不是风格选择。

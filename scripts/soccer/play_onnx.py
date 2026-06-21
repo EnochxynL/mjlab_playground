@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import tempfile
 
 # Trigger task registration.
 import mjlab_playground  # noqa: F401
@@ -130,16 +129,6 @@ _JOINT_POS_SLICE = slice(67, 96)
 _JOINT_VEL_SLICE = slice(96, 125)
 _ACTIONS_SLICE = slice(125, 154)
 
-
-def _remap_motion_file(src_path: str) -> str:
-  """Create a copy of *src_path* with joint data reordered to MJLab order."""
-  data = dict(np.load(src_path, allow_pickle=True))
-  data["joint_pos"] = data["joint_pos"][:, _OBS_PERM]
-  data["joint_vel"] = data["joint_vel"][:, _OBS_PERM]
-  fd, dst = tempfile.mkstemp(suffix=".npz", prefix="mjlab_motion_")
-  os.close(fd)
-  np.savez(dst, **data)
-  return dst
 
 
 # ── ONNX policy wrapper ────────────────────────────────────────────────
@@ -277,14 +266,11 @@ def main() -> None:
   )
   args = parser.parse_args()
 
-  # Remap IsaacLab motion file to MJLab joint order so the motion-
-  # command system writes correct joint targets during reset/tracking.
-  remapped_motion = _remap_motion_file(args.motion)
-
+  # MotionLoader now permutes joint data to MJCF order internally.
   # -- env ----------------------------------------------------------------
   cfg = g1_soccer_destination_env_cfg(play=True)
   cfg.scene.num_envs = 1
-  cfg.commands["motion"].motion_files = [remapped_motion]
+  cfg.commands["motion"].motion_files = [args.motion]
 
   env = ManagerBasedRlEnv(cfg=cfg, device=args.device)
 

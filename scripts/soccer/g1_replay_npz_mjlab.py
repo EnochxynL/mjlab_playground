@@ -128,42 +128,7 @@ def run_simulator(env: ManagerBasedRlEnv, motion_path: str) -> None:
         [0],  # IsaacLab: torch.tensor([0], device=sim.device) → MJLab: [0]
         device="cpu",  # IsaacLab: sim.device → MJLab: "cpu"
     )
-    # .npz 的 joint_pos 列顺序是 IsaacLab（按关节类型分组），
-    # 而 MuJoCo MJCF（及 Entity API）期望 limb 顺序（左腿→右腿→腰→左臂→右臂）。
-    # 用 ISAACLAB_TO_MUJOCO_REINDEX 重排 MotionLoader 中的 joint 数据。
-    _ISAACLAB_TO_MUJOCO: list[int] = [
-        0,
-        3,
-        6,
-        9,
-        13,
-        17,
-        1,
-        4,
-        7,
-        10,
-        14,
-        18,
-        2,
-        5,
-        8,
-        11,
-        15,
-        19,
-        21,
-        23,
-        25,
-        27,
-        12,
-        16,
-        20,
-        22,
-        24,
-        26,
-        28,
-    ]
-    motion.joint_pos = motion.joint_pos[:, _ISAACLAB_TO_MUJOCO]
-    motion.joint_vel = motion.joint_vel[:, _ISAACLAB_TO_MUJOCO]
+    # MotionLoader now permutes joint_pos/joint_vel to MJCF order internally.
     motion_fps = getattr(motion, "fps", None)
     if motion_fps is not None:
         fps_array = np.asarray(motion_fps)
