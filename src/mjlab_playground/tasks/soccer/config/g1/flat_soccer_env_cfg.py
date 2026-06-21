@@ -1,9 +1,5 @@
 import math
 from dataclasses import dataclass, field  # MJLab: needed for @dataclass port of @configclass
-from pathlib import Path
-import mujoco
-
-from mjlab.entity import EntityCfg
 
 from mjlab.managers.observation_manager import ObservationTermCfg as ObsTerm  # MJLab: isaaclab.managers → mjlab.managers
 from mjlab.managers.reward_manager import RewardTermCfg as RewTerm  # MJLab: isaaclab.managers → mjlab.managers
@@ -17,6 +13,7 @@ from mjlab.sensor.contact_sensor import ContactSensorCfg  # MJLab: isaaclab.sens
 # MJLab: soccer.tasks.tracking.config.g1.agents.rsl_rl_ppo_cfg LOW_FREQ_SCALE → not ported
 from ... import mdp  # MJLab: soccer.tasks.tracking → ...mdp → mjlab_playground.tasks.soccer.mdp
 from ...tracking_env_cfg import TrackingEnvCfg, MySceneCfg, CurriculumCfg  # MJLab: tracking_env_cfg → tracking_env_config
+from ...soccer_env_cfg import SOCCER_BALL_RADIUS, _apply_soccer_obs, _apply_soccer_scene  # MJLab: soccer_env_cfg → soccer_env_config
 from .flat_env_cfg import G1FlatEnvCfg  # MJLab: .flat_env_cfg → .flat_env_config
 
 # MJLab: isaaclab.terrains TerrainImporterCfg, TerrainGeneratorCfg → not available (MJLab terrain system differs)
@@ -26,53 +23,14 @@ from .flat_env_cfg import G1FlatEnvCfg  # MJLab: .flat_env_cfg → .flat_env_con
 
 from mjlab.managers.termination_manager import TerminationTermCfg as DoneTerm  # MJLab: isaaclab.managers → mjlab.managers
 
-SOCCER_BALL_RADIUS = 0.11
-
-SOCCER_ASSET_PATH = Path(__file__).parents[2] / "mdp" / "soccer_ball.xml" # MJLab: SOCCER_ASSET_PATH = f"{ASSET_DIR}/soccer/soccer.usda" — USD asset not available; MJLab uses XML
-
-def _get_ball_spec() -> mujoco.MjSpec:
-    return mujoco.MjSpec.from_file(str(SOCCER_ASSET_PATH))
-
-
-def get_soccer_ball_cfg() -> EntityCfg:
-    return EntityCfg(
-        spec_fn=_get_ball_spec,
-        init_state=EntityCfg.InitialStateCfg(
-            pos=(0.7, 0.0, SOCCER_BALL_RADIUS),
-        ),
-    )
-
-
-def _apply_soccer_obs(cfg):
-    cfg.observations.policy.target_point_pos = ObsTerm(
-        func=mdp.constant_target_point_pos,
-        params={"command_name": "motion"},
-    )
-
-    cfg.observations.critic.target_point_pos = ObsTerm(
-        func=mdp.constant_target_point_pos,
-        params={"command_name": "motion"},
-    )
-
-    cfg.observations.policy.target_destination_pos_local = ObsTerm(
-        func=mdp.target_destination_pos_local,
-        params={"command_name": "motion"},
-    )
-
-    cfg.observations.critic.target_destination_pos_local = ObsTerm(
-        func=mdp.target_destination_pos_local,
-        params={"command_name": "motion"},
-    )
-
-
-def _apply_soccer_scene(cfg):
-    # MJLab: cfg.scene.soccer_ball = cfg.scene.soccer_ball.replace(prim_path="{ENV_REGEX_NS}/SoccerBall") — USD prim_path manipulation not available
-    cfg.scene.soccer_ball.init_state.pos = (0.0, 0.0, SOCCER_BALL_RADIUS)
-
-    # MJLab: VisualizationMarkersCfg(target_point_marker_cfg / target_destination_marker_cfg) not available (MuJoCo viewer doesn't use markers)
-    # MJLab: sim_utils.SphereCfg, PreviewSurfaceCfg not available
+## Soccer configuration has been moved to soccer_env_cfg.py to be shared between G1 and T1.
 
 ## Scene configuration
+
+# 那些 G1Flat* 类本身就是死代码，不需要 T1 对应版本。
+# G1FlatProximityEnvCfg、G1FlatKickEnvCfg 等一整条继承链 — 连 G1 自己都不用它们了。grep 结果显示这些类没有被任何地方 import 或实例化，只在 env_cfgs.py 的注释里作为历史说明被引用。
+# 新的 G1 env_cfgs.py 已经用工厂模式（make_tracking_env_cfg() + _apply_common_soccer_config()）替代了旧的 @configclass 继承链，T1 env_cfgs.py 遵循了同样的模式。
+# 同理，T1FlatEnvCfg 和 G1FlatEnvCfg 也没有被任何地方实际使用，也是遗留代码。
 
 @dataclass(kw_only=True)  # MJLab: @configclass → @dataclass(kw_only=True)
 class G1FlatSoccerSceneCfg(MySceneCfg):

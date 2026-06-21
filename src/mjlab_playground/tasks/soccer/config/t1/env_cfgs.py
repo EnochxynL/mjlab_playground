@@ -27,8 +27,7 @@ from ...mdp import commands_multi_motion_soccer as soccer_commands
 from ...mdp import observations as soccer_obs
 from ...mdp import rewards as soccer_rewards
 
-# Soccer ball config is robot-agnostic; reuse from G1.
-from ..g1.flat_soccer_env_cfg import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
+from ...soccer_env_cfg import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
 
 # ── T1 body names (G1 → T1 equivalents) ─────────────────────────────────────
 
@@ -130,7 +129,7 @@ def _apply_common_soccer_config(
 
     # ── commands ─────────────────────────────────────────────────────
 
-    motion_cfg = soccer_commands.MotionCommandCfg(
+    motion_cfg = soccer_commands.MotionCommandCfg(  # MJLab: SoccerMotionCommandCfg → MotionCommandCfg
         entity_name="robot",
         anchor_body_name="Trunk",
         pelvis_body_name="Trunk",
