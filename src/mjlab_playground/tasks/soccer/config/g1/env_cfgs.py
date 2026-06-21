@@ -31,6 +31,54 @@ from ...soccer_env_cfg import SOCCER_BALL_RADIUS, get_soccer_ball_cfg
 # MJLab 的 `@dataclass` 不允许字段重定义，这个继承链断了。所以只能把同样的逻辑"展平"成一个工厂函数：调 `make_tracking_env_cfg()` 拿到裸配置，然后 _apply_common_soccer_config() 一次性把所有层级的修改叠上去，最后返回。
 # 本质上 `_apply_common_soccer_config` 就是在模拟 `@configclass` 的继承叠加能力。
 
+# ── G1 body names ─────────────────────────────────────
+
+_G1_TRACKING_BODIES = (
+    "pelvis",
+    "left_hip_roll_link",
+    "left_knee_link",
+    "left_ankle_roll_link",
+    "right_hip_roll_link",
+    "right_knee_link",
+    "right_ankle_roll_link",
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link",
+)
+
+# Bodies without feet (used by motion_body_pos/ori rewards).
+_G1_TRACKING_BODIES_NO_FEET = (
+    "pelvis",
+    "left_hip_roll_link",
+    "left_knee_link",
+    "right_hip_roll_link",
+    "right_knee_link",
+    "torso_link",
+    "left_shoulder_roll_link",
+    "left_elbow_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_roll_link",
+    "right_elbow_link",
+    "right_wrist_yaw_link",
+)
+
+_G1_FOOT_BODIES = ("left_ankle_roll_link", "right_ankle_roll_link")
+_G1_EE_BODIES = (
+    "left_ankle_roll_link",
+    "right_ankle_roll_link",
+    "left_wrist_yaw_link",
+    "right_wrist_yaw_link",
+)
+_G1_WAIST_JOINTS = ("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint")
+
+
+# ── common setup ────────────────────────────────────────────────────────────
+
+
 def _apply_common_soccer_config(
     cfg: ManagerBasedRlEnvCfg,
     has_state_estimation: bool,
@@ -85,22 +133,8 @@ def _apply_common_soccer_config(
     motion_cfg = soccer_commands.MotionCommandCfg(  # MJLab: SoccerMotionCommandCfg → MotionCommandCfg
         entity_name="robot",
         anchor_body_name="torso_link",
-        body_names=(
-            "pelvis",
-            "left_hip_roll_link",
-            "left_knee_link",
-            "left_ankle_roll_link",
-            "right_hip_roll_link",
-            "right_knee_link",
-            "right_ankle_roll_link",
-            "torso_link",
-            "left_shoulder_roll_link",
-            "left_elbow_link",
-            "left_wrist_yaw_link",
-            "right_shoulder_roll_link",
-            "right_elbow_link",
-            "right_wrist_yaw_link",
-        ),
+        pelvis_body_name="pelvis",
+        body_names=_G1_TRACKING_BODIES,
         pose_range={
             "x": (-0.05, 0.05),
             "y": (-0.05, 0.05),
@@ -192,34 +226,8 @@ def _apply_common_soccer_config(
 
     cfg.rewards["motion_global_root_pos"].weight = 0.0
     cfg.rewards["motion_global_root_ori"].weight = 1.0
-    cfg.rewards["motion_body_pos"].params["body_names"] = (
-        "pelvis",
-        "left_hip_roll_link",
-        "left_knee_link",
-        "right_hip_roll_link",
-        "right_knee_link",
-        "torso_link",
-        "left_shoulder_roll_link",
-        "left_elbow_link",
-        "left_wrist_yaw_link",
-        "right_shoulder_roll_link",
-        "right_elbow_link",
-        "right_wrist_yaw_link",
-    )
-    cfg.rewards["motion_body_ori"].params["body_names"] = (
-        "pelvis",
-        "left_hip_roll_link",
-        "left_knee_link",
-        "right_hip_roll_link",
-        "right_knee_link",
-        "torso_link",
-        "left_shoulder_roll_link",
-        "left_elbow_link",
-        "left_wrist_yaw_link",
-        "right_shoulder_roll_link",
-        "right_elbow_link",
-        "right_wrist_yaw_link",
-    )
+    cfg.rewards["motion_body_pos"].params["body_names"] = _G1_TRACKING_BODIES_NO_FEET
+    cfg.rewards["motion_body_ori"].params["body_names"] = _G1_TRACKING_BODIES_NO_FEET
 
     # ── terminations ─────────────────────────────────────────────────
 
@@ -227,12 +235,7 @@ def _apply_common_soccer_config(
         func=cfg.terminations["anchor_pos"].func,
         params={"command_name": "motion", "threshold": 0.25},
     )
-    cfg.terminations["ee_body_pos"].params["body_names"] = (
-        "left_ankle_roll_link",
-        "right_ankle_roll_link",
-        "left_wrist_yaw_link",
-        "right_wrist_yaw_link",
-    )
+    cfg.terminations["ee_body_pos"].params["body_names"] = _G1_EE_BODIES
 
     # ── events ───────────────────────────────────────────────────────
 
@@ -258,14 +261,8 @@ def _apply_common_soccer_config(
 
     # ── return SceneEntityCfg helpers for per-stage reward setup ─────
 
-    foot_cfg = SceneEntityCfg(
-        "robot",
-        body_names=("left_ankle_roll_link", "right_ankle_roll_link"),
-    )
-    waist_cfg = SceneEntityCfg(
-        "robot",
-        joint_names=("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint"),
-    )
+    foot_cfg = SceneEntityCfg("robot", body_names=_G1_FOOT_BODIES)
+    waist_cfg = SceneEntityCfg("robot", joint_names=_G1_WAIST_JOINTS)
     return foot_cfg, waist_cfg
 
 
@@ -354,7 +351,7 @@ def g1_soccer_destination_env_cfg(
         params={
             "command_name": "motion",
             "std": 0.3,
-            "foot_body_names": ["left_ankle_roll_link", "right_ankle_roll_link"],
+            "foot_body_names": list(_G1_FOOT_BODIES),
         },
     )
     cfg.rewards["waist_action_rate_l2"] = RewardTermCfg(
