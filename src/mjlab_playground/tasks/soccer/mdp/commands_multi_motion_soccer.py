@@ -172,6 +172,7 @@ class MotionCommand(CommandTerm):
             self.kick_contact_tracker = KickContactTracker(env, self._state_prefix)
 
         self.robot_anchor_body_index = self.robot.body_names.index(self.cfg.anchor_body_name)
+        self.robot_pelvis_body_index = self.robot.body_names.index(self.cfg.pelvis_body_name)
         self.motion_anchor_body_index = self.cfg.body_names.index(self.cfg.anchor_body_name)
         self.body_indexes = torch.tensor(
             self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
@@ -355,13 +356,11 @@ class MotionCommand(CommandTerm):
 
     @property
     def robot_pelvis_pos_w(self) -> torch.Tensor:
-        pelvis_index = self.robot.body_names.index("pelvis")
-        return self.robot.data.body_link_pos_w[:, pelvis_index]  # MJLab: body_pos_w → body_link_pos_w
+        return self.robot.data.body_link_pos_w[:, self.robot_pelvis_body_index]
     
     @property
     def robot_pelvis_quat_w(self) -> torch.Tensor:
-        pelvis_index = self.robot.body_names.index("pelvis")
-        return self.robot.data.body_link_quat_w[:, pelvis_index]  # MJLab: body_quat_w → body_link_quat_w
+        return self.robot.data.body_link_quat_w[:, self.robot_pelvis_body_index]
 
     @property
     def robot_anchor_lin_vel_w(self) -> torch.Tensor:
@@ -800,6 +799,7 @@ class MotionCommandCfg(CommandTermCfg):
     motion_files: list[str] = field(default_factory=list)  # MJLab: MISSING → field(default_factory=list) for compatibility
 
     anchor_body_name: str = ""
+    pelvis_body_name: str = "pelvis"
     body_names: list[str] = field(default_factory=list)  # MJLab: MISSING → field(default_factory=list)
 
     # MJLab: inherited from CommandTermCfg (not in IsaacLab)
