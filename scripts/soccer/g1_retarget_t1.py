@@ -292,7 +292,41 @@ def main() -> None:
       sys.exit(1)
 
   frames = int(src["joint_pos"].shape[0])
-  g1_joint_pos = src["joint_pos"].astype(np.float64)
+  # .npz 的 joint_pos 列顺序是 IsaacLab（按关节类型分组），
+  # 而 _G1_JOINT_NAMES 及 MuJoCo MJCF 是 limb 顺序（左腿→右腿→腰→左臂→右臂）。
+  # 重排到 limb 顺序以匹配 _G1_JOINT_NAMES 的索引。
+  _ISAACLAB_TO_MUJOCO: list[int] = [
+    0,
+    3,
+    6,
+    9,
+    13,
+    17,
+    1,
+    4,
+    7,
+    10,
+    14,
+    18,
+    2,
+    5,
+    8,
+    11,
+    15,
+    19,
+    21,
+    23,
+    25,
+    27,
+    12,
+    16,
+    20,
+    22,
+    24,
+    26,
+    28,
+  ]
+  g1_joint_pos = src["joint_pos"][:, _ISAACLAB_TO_MUJOCO].astype(np.float64)
   g1_pelvis_pos = src["body_pos_w"][:, 0, :].astype(np.float64)
   g1_pelvis_quat = src["body_quat_w"][:, 0, :].astype(np.float64)
   g1_body_pos_w = src["body_pos_w"].astype(np.float64)
