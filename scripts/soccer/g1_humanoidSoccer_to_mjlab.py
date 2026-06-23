@@ -58,6 +58,10 @@ _ISAACLAB_TO_MJCF = np.array([_isaac_to_idx[n] for n in _MJLAB_JOINT_ORDER], dty
 """
 # CRITICAL BUG FIX: G1 body order mismatch
 
+## Phenomenon: G1 Stage 1 training failed
+
+The robot's joints swung wildly and chaotically, even causing it to fly into the air, with almost no relation to soccer
+
 ## Root cause: G1 body order mismatch
 
 The [g1_humanoidSoccer_to_mjlab.py](scripts/soccer/g1_humanoidSoccer_to_mjlab.py) conversion script only remapped **joint** data from IsaacLab order to MJLab/MuJoCo order, but left **body** data in IsaacLab's ordering. This meant:
