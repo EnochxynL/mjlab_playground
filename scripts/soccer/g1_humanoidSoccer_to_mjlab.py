@@ -55,9 +55,117 @@ _MJLAB_JOINT_ORDER: tuple[str, ...] = (
 _isaac_to_idx = {n: i for i, n in enumerate(_ISAACLAB_JOINT_ORDER)}
 _ISAACLAB_TO_MJCF = np.array([_isaac_to_idx[n] for n in _MJLAB_JOINT_ORDER], dtype=np.int64)
 
+"""
+# CRITICAL BUG FIX: G1 body order mismatch
+
+## Root cause: G1 body order mismatch
+
+The [g1_humanoidSoccer_to_mjlab.py](scripts/soccer/g1_humanoidSoccer_to_mjlab.py) conversion script only remapped **joint** data from IsaacLab order to MJLab/MuJoCo order, but left **body** data in IsaacLab's ordering. This meant:
+
+- MJLab's `body_indexes` mapping looked up bodies by MuJoCo body index
+- `torso_link` (MJCF body index 15) was reading the position of what was actually a **foot** in IsaacLab order (z=0.08m at ground level)
+- `anchor_pos` termination compared reference torso at ground level against actual robot torso at standing height (z=0.87m) → terminated every step
+- Constant resets kept `actions` observation always zero → 29/160 obs dims had zero std → policy corrupted
+
+## Fix applied
+
+Added body-order remapping to the conversion script with:
+- `_MJLAB_BODY_ORDER` — 30 body names in MuJoCo/MJCF limb-grouped order
+- `_ISAACLAB_BODY_ORDER` — 30 body names in IsaacLab type-grouped order (determined by FK matching)
+- `_MJCF_TO_ISAAC_BODY` permutation to reorder `body_pos_w`, `body_quat_w`, `body_lin_vel_w`, `body_ang_vel_w`
+
+All 10 G1 .npz files were regenerated. Verification confirms:
+- `torso_link` at body index 15 now has z=0.866m (standing height)
+- Environment runs 10+ steps without `anchor_pos` termination
+- T1 .npz files were unaffected (already in correct order, explaining why T1 training worked)
+
+The G1 Stage 1 training needs to be re-run with the fixed .npz files.
+
+"""
+
+# ── Body-order remapping ───────────────────────────────────────────────
+# IsaacLab groups bodies by type (all left/right pairs together, similar to
+# joint grouping), while MuJoCo/MJCF groups by limb in XML order.  The
+# .npz body data must be reordered to match MJCF so that body_indexes
+# lookups in MultiMotionLoader hit the right bodies.
+
+_MJLAB_BODY_ORDER: tuple[str, ...] = (
+    # MJCF body order excluding world (MuJoCo body indices 1-30).
+    "pelvis",
+    "left_hip_pitch_link",
+    "left_hip_roll_link",
+    "left_hip_yaw_link",
+    "left_knee_link",
+    "left_ankle_pitch_link",
+    "left_ankle_roll_link",
+    "right_hip_pitch_link",
+    "right_hip_roll_link",
+    "right_hip_yaw_link",
+    "right_knee_link",
+    "right_ankle_pitch_link",
+    "right_ankle_roll_link",
+    "waist_yaw_link",
+    "waist_roll_link",
+    "torso_link",
+    "left_shoulder_pitch_link",
+    "left_shoulder_roll_link",
+    "left_shoulder_yaw_link",
+    "left_elbow_link",
+    "left_wrist_roll_link",
+    "left_wrist_pitch_link",
+    "left_wrist_yaw_link",
+    "right_shoulder_pitch_link",
+    "right_shoulder_roll_link",
+    "right_shoulder_yaw_link",
+    "right_elbow_link",
+    "right_wrist_roll_link",
+    "right_wrist_pitch_link",
+    "right_wrist_yaw_link",
+)
+
+_ISAACLAB_BODY_ORDER: tuple[str, ...] = (
+    # IsaacLab body order as it appears in the original .npz (determined by
+    # comparing .npz positions against MuJoCo FK output on the first frame).
+    "pelvis",
+    "left_hip_pitch_link",
+    "right_hip_pitch_link",
+    "waist_yaw_link",
+    "left_hip_roll_link",
+    "right_hip_roll_link",
+    "torso_link",
+    "left_hip_yaw_link",
+    "right_hip_yaw_link",
+    "waist_roll_link",
+    "left_knee_link",
+    "right_knee_link",
+    "left_shoulder_pitch_link",
+    "right_shoulder_pitch_link",
+    "left_ankle_pitch_link",
+    "right_ankle_pitch_link",
+    "left_shoulder_roll_link",
+    "right_shoulder_roll_link",
+    "left_ankle_roll_link",
+    "right_ankle_roll_link",
+    "left_shoulder_yaw_link",
+    "right_shoulder_yaw_link",
+    "left_elbow_link",
+    "right_elbow_link",
+    "left_wrist_roll_link",
+    "right_wrist_roll_link",
+    "left_wrist_pitch_link",
+    "right_wrist_pitch_link",
+    "left_wrist_yaw_link",
+    "right_wrist_yaw_link",
+)
+
+_isaac_body_to_idx = {n: i for i, n in enumerate(_ISAACLAB_BODY_ORDER)}
+_MJCF_TO_ISAAC_BODY = np.array(
+    [_isaac_body_to_idx[n] for n in _MJLAB_BODY_ORDER], dtype=np.int64
+)
+
 
 def convert_npz(input_path: str, output_path: str) -> None:
-    """Load *input_path*, permute joint data, save to *output_path*."""
+    """Load *input_path*, permute joint and body data, save to *output_path*."""
     src = dict(np.load(input_path, allow_pickle=True))
 
     for key in ("joint_pos", "joint_vel"):
@@ -75,6 +183,18 @@ def convert_npz(input_path: str, output_path: str) -> None:
 
     src["joint_pos"] = src["joint_pos"][:, _ISAACLAB_TO_MJCF]
     src["joint_vel"] = src["joint_vel"][:, _ISAACLAB_TO_MJCF]
+
+    n_bodies = src["body_pos_w"].shape[1]
+    if n_bodies != len(_MJCF_TO_ISAAC_BODY):
+        print(
+            f"ERROR: expected {len(_MJCF_TO_ISAAC_BODY)} bodies, got {n_bodies}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    for key in ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"):
+        if key in src:
+            src[key] = src[key][:, _MJCF_TO_ISAAC_BODY]
 
     out_dir = Path(output_path).parent
     out_dir.mkdir(parents=True, exist_ok=True)
