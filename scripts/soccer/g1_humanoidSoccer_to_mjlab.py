@@ -60,7 +60,9 @@ _ISAACLAB_TO_MJCF = np.array([_isaac_to_idx[n] for n in _MJLAB_JOINT_ORDER], dty
 
 ## Phenomenon: G1 Stage 1 training failed
 
-The robot's joints swung wildly and chaotically, even causing it to fly into the air, with almost no relation to soccer
+The robot's joints swung wildly and chaotically, even causing it to fly into the air, with almost no relation to soccer.
+
+The iteration time will be very slow because the environment is terminating every step due to `anchor_pos` termination, which compares the reference torso position (at ground level) against the actual robot torso position (at standing height).
 
 ## Root cause: G1 body order mismatch
 
