@@ -1,130 +1,132 @@
-"""Constants for AiNex MuJoCo environment (following Playground OP3 pattern).
-Ported from https://github.com/elizaOS/eliza/blob/main/packages/robot/eliza_robot/sim/mujoco/ainex_constants.py"""
+"""AiNex robot constants (following mjlab T1 pattern).
+
+Actuator parameters sourced from eliza_robot/bridge/isaaclab/ainex_cfg.py.
+Home pose from STAND_JOINT_POSITIONS in the same source.
+"""
 
 from pathlib import Path
 
-# Package-local directory (where the legacy ROOT_PATH used to point).
-_PKG_DIR = Path(__file__).resolve().parent
+import mujoco
+from mjlab.actuator import BuiltinPositionActuatorCfg
+from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
+from mjlab.utils.spec_config import CollisionCfg
 
-# Primary profile MJCF directory (W2.2 sibling agent owns this tree).
-# packages/robot/eliza_robot/sim/mujoco/__init__.py
-#   -> packages/robot/eliza_robot/sim/mujoco
-#   -> packages/robot/eliza_robot/sim
-#   -> packages/robot/eliza_robot
-#   -> packages/robot
-_PACKAGE_ROOT = _PKG_DIR.parent.parent.parent
-_PROFILE_MJCF_DIR = (
-    _PACKAGE_ROOT / "assets" / "profiles" / "hiwonder-ainex" / "mjcf"
+##
+# MJCF and assets.
+##
+
+AINEX_XML: Path = Path(__file__).parent / "xmls" / "ainex.xml"
+assert AINEX_XML.exists()
+
+
+def get_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(AINEX_XML))
+
+
+##
+# Actuator config.
+# Parameters from eliza_robot/bridge/isaaclab/ainex_cfg.py.
+# Actuator names match the <position name="..."> elements in ainex.xml.
+##
+
+AINEX_ACTUATOR_LEG = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        "r_hip_yaw_act", "r_hip_roll_act", "r_hip_pitch_act",
+        "r_knee_act", "r_ank_pitch_act", "r_ank_roll_act",
+        "l_hip_yaw_act", "l_hip_roll_act", "l_hip_pitch_act",
+        "l_knee_act", "l_ank_pitch_act", "l_ank_roll_act",
+    ),
+    stiffness=50.0,
+    damping=5.0,
+    effort_limit=6.0,
 )
 
-def _resolve_mjcf(filename: str) -> Path:
-    """Resolve an MJCF/XML asset by name.
+AINEX_ACTUATOR_ARM = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        "r_sho_pitch_act", "r_sho_roll_act", "r_el_pitch_act",
+        "r_el_yaw_act", "r_gripper_act",
+        "l_sho_pitch_act", "l_sho_roll_act", "l_el_pitch_act",
+        "l_el_yaw_act", "l_gripper_act",
+    ),
+    stiffness=10.0,
+    damping=1.0,
+    effort_limit=6.0,
+)
 
-    Search order:
-      1. ``packages/robot/assets/profiles/hiwonder-ainex/mjcf/<filename>``
-         (canonical W2.2 location)
-      2. ``packages/robot/eliza_robot/sim/mujoco/<filename>`` (fallback for
-         files that haven't been migrated into the profile asset dir yet)
+AINEX_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
+    target_names_expr=("head_pan_act", "head_tilt_act"),
+    stiffness=10.0,
+    damping=1.0,
+    effort_limit=6.0,
+)
 
-    Raises:
-        FileNotFoundError: if the asset cannot be located in either path.
-    """
-    candidates = (
-        _PROFILE_MJCF_DIR / filename,
-        _PKG_DIR / filename,
+##
+# Keyframes.
+# Home pose from eliza_robot/bridge/isaaclab/ainex_cfg.py STAND_JOINT_POSITIONS.
+# All leg/head joints are zero; arms are tucked inward.
+# Spawn height matches the "stand" keyframe in ainex.xml.
+##
+
+HOME_KEYFRAME = EntityCfg.InitialStateCfg(
+    pos=(0.0, 0.0, 0.25),
+    joint_pos={
+        "r_sho_roll": 1.403,
+        "l_sho_roll": -1.403,
+        "r_el_yaw": 1.226,
+        "l_el_yaw": -1.226,
+    },
+    joint_vel={".*": 0.0},
+)
+
+##
+# Collision config.
+# Foot contact geoms are l_foot1, l_foot2, r_foot1, r_foot2 in ainex.xml.
+##
+
+_foot_regex = r"^[lr]_foot[12]$"
+
+FULL_COLLISION = CollisionCfg(
+    geom_names_expr=(_foot_regex,),
+    solref=(0.004, 1),
+    condim=6,
+    friction=(1.5, 0.5, 0.01),
+    priority=1,
+)
+
+##
+# Final config.
+##
+
+AINEX_ARTICULATION = EntityArticulationInfoCfg(
+    actuators=(AINEX_ACTUATOR_LEG, AINEX_ACTUATOR_ARM, AINEX_ACTUATOR_HEAD),
+    soft_joint_pos_limit_factor=0.95,
+)
+
+
+def get_ainex_robot_cfg() -> EntityCfg:
+    """Get a fresh AiNex robot configuration instance."""
+    return EntityCfg(
+        init_state=HOME_KEYFRAME,
+        collisions=(FULL_COLLISION,),
+        spec_fn=get_spec,
+        articulation=AINEX_ARTICULATION,
     )
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    searched = "\n  - ".join(str(c) for c in candidates)
-    raise FileNotFoundError(
-        f"MJCF asset {filename!r} not found. Searched:\n  - {searched}"
-    )
 
-# Kept for backward-compat callers; points at the package dir so any
-# residual ``ROOT_PATH / "<some>.xml"`` lookups still find the local copy.
-ROOT_PATH = Path(__file__).resolve().parent
 
-# Scene XMLs (resolved via the profile-aware helper).
-SCENE_XML = _resolve_mjcf("ainex.xml")                          # Full mesh version (for rendering)
-SCENE_MJX_XML = _resolve_mjcf("ainex_mjx.xml")                  # MJX-optimized (primitive collisions + mesh visuals)
-SCENE_PRIMITIVES_XML = _resolve_mjcf("ainex_primitives.xml")    # Pure primitives (fastest, for training)
-SCENE_REALISTIC_XML = _resolve_mjcf("ainex_primitives_realistic.xml")  # Realistic mass/force limits
-SCENE_GRASP_XML = _resolve_mjcf("ainex_grasp_scene.xml")        # Primitives + graspable object (for manipulation)
+AINEX_ACTION_SCALE: dict[str, float] = {}
+for a in AINEX_ARTICULATION.actuators:
+    assert isinstance(a, BuiltinPositionActuatorCfg)
+    e = a.effort_limit
+    s = a.stiffness
+    names = a.target_names_expr
+    assert e is not None
+    for n in names:
+        AINEX_ACTION_SCALE[n] = 0.25 * e / s
 
-# Foot sites for contact detection and clearance tracking
-FEET_SITES = [
-    "left_foot",
-    "right_foot",
-]
 
-# Foot geoms for floor contact detection
-LEFT_FEET_GEOMS = [
-    "l_foot1",
-    "l_foot2",
-]
-RIGHT_FEET_GEOMS = [
-    "r_foot1",
-    "r_foot2",
-]
+if __name__ == "__main__":
+    import mujoco.viewer as viewer
+    from mjlab.entity.entity import Entity
 
-# Root body name
-ROOT_BODY = "body_link"
-
-# Sensor names (matching ainex.xml)
-GRAVITY_SENSOR = "upvector"
-GLOBAL_LINVEL_SENSOR = "global_linvel"
-GLOBAL_ANGVEL_SENSOR = "global_angvel"
-LOCAL_LINVEL_SENSOR = "local_linvel"
-ACCELEROMETER_SENSOR = "accelerometer"
-GYRO_SENSOR = "gyro"
-
-# Joint groups
-LEG_JOINT_NAMES = (
-    "r_hip_yaw", "r_hip_roll", "r_hip_pitch", "r_knee", "r_ank_pitch", "r_ank_roll",
-    "l_hip_yaw", "l_hip_roll", "l_hip_pitch", "l_knee", "l_ank_pitch", "l_ank_roll",
-)
-
-ARM_JOINT_NAMES = (
-    "r_sho_pitch", "r_sho_roll", "r_el_pitch", "r_el_yaw", "r_gripper",
-    "l_sho_pitch", "l_sho_roll", "l_el_pitch", "l_el_yaw", "l_gripper",
-)
-
-HEAD_JOINT_NAMES = (
-    "head_pan", "head_tilt",
-)
-
-# All actuated joints in actuator order
-ALL_JOINT_NAMES = LEG_JOINT_NAMES + HEAD_JOINT_NAMES + ARM_JOINT_NAMES
-
-# Number of actuators per group
-NUM_LEG_ACTUATORS = 12
-NUM_HEAD_ACTUATORS = 2
-NUM_ARM_ACTUATORS = 10
-NUM_ACTUATORS = 24
-
-# Entity body names for perception training
-# These bodies exist in ainex_primitives.xml as static obstacles
-ENTITY_BODY_NAMES = (
-    "entity_box_0",
-    "entity_box_1",
-    "entity_cylinder_0",
-    "entity_person_0",
-)
-
-# Entity types matching perception/entity_slots/slot_config.py EntityType
-# 0=UNKNOWN, 1=PERSON, 2=OBJECT, 3=LANDMARK, 4=FURNITURE, 5=DOOR
-ENTITY_BODY_TYPES = (
-    2,  # entity_box_0 -> OBJECT
-    2,  # entity_box_1 -> OBJECT
-    4,  # entity_cylinder_0 -> FURNITURE
-    1,  # entity_person_0 -> PERSON
-)
-
-# Entity sizes (width, height, depth) in meters
-ENTITY_BODY_SIZES = (
-    (0.30, 0.30, 0.30),    # box 0
-    (0.30, 0.30, 0.30),    # box 1
-    (0.20, 0.50, 0.20),    # cylinder
-    (0.40, 1.70, 0.30),    # person capsule
-)
+    robot = Entity(get_ainex_robot_cfg())
+    viewer.launch(robot.spec.compile())
