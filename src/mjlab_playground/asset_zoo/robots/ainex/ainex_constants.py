@@ -1,4 +1,5 @@
-"""Constants for AiNex MuJoCo environment (following Playground OP3 pattern)."""
+"""Constants for AiNex MuJoCo environment (following Playground OP3 pattern).
+Ported from https://github.com/elizaOS/eliza/blob/main/packages/robot/eliza_robot/sim/mujoco/ainex_constants.py"""
 
 from pathlib import Path
 
